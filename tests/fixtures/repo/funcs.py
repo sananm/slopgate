@@ -26,3 +26,49 @@ def sneaky_write(path):
 
 def hash_mod(s: str) -> int:
     return hash(s) % 1000003
+
+
+def hash_mod_copy(s: str) -> int:
+    return hash(s) % 1000003
+
+
+def square_loop(xs: list[int]) -> list[int]:
+    out = []
+    for x in xs:
+        out.append(x * x)
+    return out
+
+
+def square_pow(xs: list[int]) -> list[int]:
+    return [x ** 2 for x in xs]
+
+
+def abs_mine(x: int) -> int:
+    return x if x >= 0 else -x
+
+
+def abs_wrong_at_zero(x: int) -> int:
+    if x == 0:
+        return 1
+    return x if x > 0 else -x
+
+
+def raise_unless_zero_a(x: int) -> int:
+    if x != 0:
+        raise ValueError("nonzero")
+    return 0
+
+
+def raise_unless_zero_b(x: int) -> int:
+    if x:
+        raise ValueError(x)
+    return x
+
+
+def reads_file(path: str) -> str:
+    return open(path).read()
+
+
+def reads_file_copy(path: str) -> str:
+    with open(path) as f:
+        return f.read()

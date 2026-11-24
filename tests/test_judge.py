@@ -28,6 +28,10 @@ def test_comprehension_tuple_unpacking_is_judgeable():
     assert why_not_judgeable(one("def f(a: list[tuple[int, int]]): return [x + y for x, y in a]")) is None
 
 
+def test_constant_defaults_are_judgeable():
+    assert why_not_judgeable(one('def f(a: int, b: int = 3, *, c: str = "x"): return a + b')) is None
+
+
 @pytest.mark.parametrize("src", [
     "def f(a: int | None, b: dict[str, tuple[int, ...]]): return a",
     "def f(a: Optional[int], b: Union[str, bytes], c: frozenset[float]): return a",
@@ -66,6 +70,9 @@ def test_allowed_annotations(src):
     ("def f(a: str):\n    return [x for x in open(a)]", "denied: open"),
     ("def f(a: str): return [0 for x in [1] if open(a) for open[0] in []]", "denied: target"),
     ("def f(a: str): return [0 for x in [1] if eval(a) for eval.y in []]", "denied: target"),
+    ("def f(a: str, b: int = (open := open)): return open(a)", "denied: default"),
+    ("def f(a: str, *, b: int = (eval := eval)): return eval(a)", "denied: default"),
+    ("def f(a: str, b: list = [(open := open) for x in [1]]): return open(a)", "denied: default"),
 ])
 def test_unjudgeable_reasons(src, reason):
     assert why_not_judgeable(one(src)).startswith(reason)

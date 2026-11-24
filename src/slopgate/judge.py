@@ -50,8 +50,11 @@ def why_not_judgeable(fn: FunctionInfo) -> str | None:
     # *args/**kwargs are not in fn.params; the prover cannot generate them.
     if tree.args.vararg or tree.args.kwarg:
         return "annotation: varargs"
-    # Param annotations are checked above, so scan only the body and default values.
-    nodes = [n for r in [*tree.body, *tree.args.defaults, *tree.args.kw_defaults] if r for n in ast.walk(r)]
+    # Defaults run at def time in the module scope (a walrus there binds globally), so allow constants only.
+    if any(not isinstance(d, ast.Constant) for d in [*tree.args.defaults, *tree.args.kw_defaults] if d):
+        return "denied: default"
+    # Param annotations are checked above and defaults are constants, so scan only the body.
+    nodes = [n for r in tree.body for n in ast.walk(r)]
     for n in nodes:
         if isinstance(n, (ast.Global, ast.Nonlocal)):
             return "denied: global"
@@ -84,6 +87,5 @@ def why_not_judgeable(fn: FunctionInfo) -> str | None:
             kids = [(c, scope) for c in ast.iter_child_nodes(n)]
         return next((r for c, sc in kids if (r := bad(c, sc))), None)
 
-    roots = [r for r in [*tree.body, *tree.args.defaults, *tree.args.kw_defaults] if r]
-    name = next((r for root in roots if (r := bad(root, allowed))), None)
+    name = next((r for root in tree.body if (r := bad(root, allowed))), None)
     return f"denied: {name}" if name else None

@@ -50,10 +50,12 @@ def _check(t0: float) -> dict:
                                budget_s=max(0.0, BUDGET_S - (time.monotonic() - t0)))
 
     found = [format_finding(f) for f in result.findings]
+    # identity without line numbers, so edits above a finding don't make it look new
+    keys = sorted({f"{f.new.path}\t{f.new.qualname}\t{f.existing.path}\t{f.existing.qualname}" for f in result.findings})
     previous = load_rounds(repo, snap.task_id)["last_findings"]
-    resolved = sum(f not in found for f in previous.split("\n\n") if f)
+    resolved = sum(k not in keys for k in previous.split("\n") if k)
     text = "\n\n".join(found)
-    block = should_block(repo, snap.task_id, text) and bool(found)
+    block = should_block(repo, snap.task_id, "\n".join(keys)) and bool(found)
     stats = {"task_id": snap.task_id, "round": load_rounds(repo, snap.task_id)["round"],
              "new": result.new_count, "judgeable": result.judgeable_count, "findings": len(found),
              "resolved": resolved, "skipped": result.skipped, "seconds": round(time.monotonic() - t0, 2)}
@@ -99,6 +101,11 @@ def install(repo: Path) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(settings, indent=2) + "\n")
     print(f"slopgate: hooks installed in {path}")
+    print("slopgate: loading the embedding model (first run downloads it)...", file=sys.stderr)
+    try:
+        default_embed()  # warm the cache now so the first Stop hook doesn't stall on a download
+    except Exception as e:
+        print(f"slopgate: model warm-up failed, the first check will retry: {type(e).__name__}: {e}", file=sys.stderr)
     return 0
 
 

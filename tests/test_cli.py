@@ -86,6 +86,18 @@ def test_blocks_inside_a_git_worktree(fixture_git_repo, tmp_path, capsys):
     assert json.loads(capsys.readouterr().out)["decision"] == "block"
 
 
+def test_finding_shifted_by_edits_above_is_not_progress(fixture_git_repo, capsys):
+    run_hook(["start"], fixture_git_repo)
+    add_reinvention(fixture_git_repo)
+    run_hook(["check"], fixture_git_repo)
+    p = fixture_git_repo / "newmod.py"
+    p.write_text("X = 1\nY = 2\n\n\n" + p.read_text())
+    run_hook(["check"], fixture_git_repo)
+    last = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert "decision" not in last
+    assert (last_stats(fixture_git_repo)["findings"], last_stats(fixture_git_repo)["resolved"]) == (1, 0)
+
+
 def test_clean_task_allows_with_summary(fixture_git_repo, capsys):
     run_hook(["start"], fixture_git_repo)
     run_hook(["check"], fixture_git_repo)
@@ -157,3 +169,16 @@ def test_install_merges_without_duplicates(tmp_path):
 def test_install_creates_settings(tmp_path):
     assert main(["install", str(tmp_path)]) == 0
     assert sorted(all_hook_commands(tmp_path)) == ["slopgate check", "slopgate start"]
+
+
+def test_install_warms_the_model_once(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr("slopgate.cli.default_embed", lambda: calls.append(1))
+    assert main(["install", str(tmp_path)]) == 0
+    assert calls == [1]
+
+
+def test_install_survives_warmup_failure(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr("slopgate.cli.default_embed", boom)
+    assert main(["install", str(tmp_path)]) == 0
+    assert "slopgate check" in all_hook_commands(tmp_path) and "boom" in capsys.readouterr().err

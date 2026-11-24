@@ -182,3 +182,21 @@ def test_install_survives_warmup_failure(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("slopgate.cli.default_embed", boom)
     assert main(["install", str(tmp_path)]) == 0
     assert "slopgate check" in all_hook_commands(tmp_path) and "boom" in capsys.readouterr().err
+
+
+def test_block_carries_the_summary(fixture_git_repo, capsys, monkeypatch):
+    monkeypatch.setattr("slopgate.cli.sandbox_kind", lambda: "none")
+    run_hook(["start"], fixture_git_repo)
+    add_reinvention(fixture_git_repo)
+    run_hook(["check"], fixture_git_repo)
+    out = json.loads(capsys.readouterr().out)
+    assert out["decision"] == "block" and out["systemMessage"].endswith("1 findings, 0 skipped (running unsandboxed)")
+
+
+def test_model_is_not_loaded_when_nothing_new_is_judgeable(fixture_git_repo, capsys, monkeypatch):
+    monkeypatch.setattr("slopgate.cli.default_embed", boom)
+    run_hook(["start"], fixture_git_repo)
+    (fixture_git_repo / "newmod.py").write_text("def load(p: str) -> str:\n    return open(p).read()\n")
+    run_hook(["check"], fixture_git_repo)
+    msg = json.loads(capsys.readouterr().out)["systemMessage"]
+    assert msg.startswith("slopgate: 1 new functions, 0 judgeable") and "boom" not in msg

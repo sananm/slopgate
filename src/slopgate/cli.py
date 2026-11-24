@@ -1,5 +1,6 @@
 import argparse
 import contextlib
+import functools
 import json
 import subprocess
 import sys
@@ -45,7 +46,8 @@ def _check(t0: float) -> dict:
     changes = classify(index_repo(repo, {p: snap.files[p] for p in changed if p in snap.files}),
                        index_repo(repo, {p: now[p] for p in changed if p in now}))
     changes.existing += index_repo(repo, {p: t for p, t in now.items() if p not in changed})
-    embed = default_embed() if changes.new else (lambda texts: [])  # skip loading the model when nothing is new
+    model = functools.cache(default_embed)  # loaded on the first embedding actually needed, if any
+    embed = lambda texts: model()(texts)  # noqa: E731
     result = find_reinventions(repo, changes, embed, pick_interpreter(repo),
                                budget_s=max(0.0, BUDGET_S - (time.monotonic() - t0)))
 
@@ -61,11 +63,11 @@ def _check(t0: float) -> dict:
              "resolved": resolved, "skipped": result.skipped, "seconds": round(time.monotonic() - t0, 2)}
     with open(state_dir(repo) / "stats.jsonl", "a") as f:
         f.write(json.dumps(stats) + "\n")
-    if block:
-        return {"decision": "block", "reason": text}
     summary = (f"slopgate: {result.new_count} new functions, {result.judgeable_count} judgeable, "
-               f"{len(found)} findings, {result.skipped} skipped")
-    return {"systemMessage": summary + (" (running unsandboxed)" if sandbox_kind() == "none" else "")}
+               f"{len(found)} findings, {result.skipped} skipped") + (" (running unsandboxed)" if sandbox_kind() == "none" else "")
+    if block:
+        return {"decision": "block", "reason": text, "systemMessage": summary}
+    return {"systemMessage": summary}
 
 
 def check() -> int:

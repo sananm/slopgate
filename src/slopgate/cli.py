@@ -21,6 +21,7 @@ from slopgate.structure import Shape, index_shapes, is_test_path, shapes_of
 from slopgate.wrappers import find_wrappers, format_wrapper
 
 BUDGET_S = 20.0
+SHAPES_VERSION = 1  # bump when shapes_of output changes, so cached shapes are recomputed
 HOOKS = {"UserPromptSubmit": "slopgate start", "Stop": "slopgate check"}
 
 
@@ -64,7 +65,7 @@ def _shape_sets(repo: Path, *text_sets: dict[str, str]) -> list[list[Shape]]:
     keep: dict[str, list] = {}  # only entries used now, so the file never grows past the repo
 
     def get(p: str, t: str) -> list[Shape]:
-        k = hashlib.sha256(f"{p}\0{t}".encode()).hexdigest()  # a Shape carries its path and module, so both key it
+        k = hashlib.sha256(f"{SHAPES_VERSION}\0{p}\0{t}".encode()).hexdigest()  # a Shape carries its path and module, so both key it
         if k not in memo:
             try:
                 memo[k], keep[k] = [_shape_from(d) for d in cache[k]], cache[k]

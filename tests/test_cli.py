@@ -300,15 +300,16 @@ def test_deeply_nested_shape_cache_is_ignored_and_replaced(fixture_git_repo, cap
     assert first["decision"] == "block" and "internal error" not in second["systemMessage"]
 
 
-@pytest.mark.parametrize("forge", [{"line": "1"}, {"bases": "XYZ"}])
-def test_forged_cache_entry_under_real_key_is_recomputed(fixture_git_repo, capsys, forge):
+@pytest.mark.parametrize("forge,salt", [({"line": "1"}, True), ({"bases": "XYZ"}, True), ({}, False)])
+def test_forged_or_unversioned_cache_entry_is_recomputed(fixture_git_repo, capsys, forge, salt):
     import hashlib
+    from slopgate.cli import SHAPES_VERSION
     run_hook(["start"], fixture_git_repo)
     paste_copy(fixture_git_repo)
     text = (fixture_git_repo / "b.py").read_text()
     bad = {"path": "b.py", "qualname": pasted_name(), "module": "b", "line": 3, "end_line": 10, "cls": None,
            "bases": [], "exact_key": "x", "near_key": "y", "consts": [], "comparable": False, **forge}
-    key = hashlib.sha256(f"b.py\0{text}".encode()).hexdigest()
+    key = hashlib.sha256((f"{SHAPES_VERSION}\0" * salt + f"b.py\0{text}").encode()).hexdigest()
     (fixture_git_repo / ".git/slopgate/shapes.json").write_text(json.dumps({key: [bad]}))
     run_hook(["check"], fixture_git_repo)
     assert json.loads(capsys.readouterr().out)["decision"] == "block"

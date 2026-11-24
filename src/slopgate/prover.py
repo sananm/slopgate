@@ -1,4 +1,5 @@
 import builtins
+import pickle
 import tempfile
 import typing
 from dataclasses import dataclass
@@ -53,6 +54,9 @@ def _same(a: object, b: object) -> bool:
 def same_outcome(a: Outcome, b: Outcome) -> bool:
     if a[0] != b[0] or len(a) != len(b):
         return False
+    # pickle keeps sharing (memo refs), so this rejects e.g. returning the argument itself vs a copy
+    if pickle.dumps(a[1:], protocol=5) != pickle.dumps(b[1:], protocol=5):
+        return False
     if a[0] == "raise":
         return a[1] == b[1] and _same(a[2], b[2])
     if a[0] == "return":
@@ -70,18 +74,18 @@ def _well_formed(batch: object, n: int) -> bool:
 
 
 def prove(repo: Path, f: FunctionInfo, g: FunctionInfo, interpreter: str) -> Verdict:
+    try:
+        return _prove(repo, f, g, interpreter)
+    except Exception as e:  # never raises: includes RecursionError from deeply nested values
+        return Verdict(None, 0, f"error: {type(e).__name__}")
+
+
+def _prove(repo: Path, f: FunctionInfo, g: FunctionInfo, interpreter: str) -> Verdict:
     for fn in (f, g):
         if why := why_not_judgeable(fn):
             return Verdict(None, 0, f"{fn.qualname}: {why}")
     if required_arity(f) != required_arity(g):
         return Verdict(None, 0, "arity differs")
-    try:
-        return _prove(repo, f, g, interpreter)
-    except Exception as e:  # includes RecursionError from deeply nested values
-        return Verdict(None, 0, f"error: {type(e).__name__}")
-
-
-def _prove(repo: Path, f: FunctionInfo, g: FunctionInfo, interpreter: str) -> Verdict:
     inputs = generate_inputs(f)
     if len(inputs) != _N:
         return Verdict(None, len(inputs), "too few inputs")

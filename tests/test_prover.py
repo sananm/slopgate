@@ -1,3 +1,4 @@
+import dataclasses
 import subprocess
 import sys
 
@@ -93,3 +94,14 @@ def test_hypothesis_never_writes_into_the_working_directory(fixture_repo, tmp_pa
             "generate_inputs(next(f for f in index_source('funcs.py', open(sys.argv[1]).read()) if f.qualname == 'abs_mine'))")
     subprocess.run([sys.executable, "-c", code, str(fixture_repo / "funcs.py")], cwd=tmp_path, check=True)
     assert not (tmp_path / ".hypothesis").exists()
+
+
+def test_returning_the_argument_differs_from_returning_a_copy(fixture_repo):
+    xs = [1]
+    assert not same_outcome(("return", xs, (xs,)), ("return", [1], ([1],)))
+    assert prove(fixture_repo, fn_named(fixture_repo, "ident_list"), fn_named(fixture_repo, "copy_list"), sys.executable).equivalent is not True
+
+
+def test_prove_never_raises_on_a_broken_function_info(fixture_repo):
+    broken = dataclasses.replace(fn_named(fixture_repo, "abs_mine"), source="")
+    assert prove(fixture_repo, broken, fn_named(fixture_repo, "abs_mine"), sys.executable).equivalent is None

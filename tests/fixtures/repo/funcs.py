@@ -72,3 +72,11 @@ def reads_file(path: str) -> str:
 def reads_file_copy(path: str) -> str:
     with open(path) as f:
         return f.read()
+
+
+def ident_list(xs: list[int]) -> list[int]:
+    return xs
+
+
+def copy_list(xs: list[int]) -> list[int]:
+    return list(xs)

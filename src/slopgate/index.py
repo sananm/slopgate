@@ -92,5 +92,6 @@ def index_repo(repo: Path, texts: dict[str, str]) -> list[FunctionInfo]:
 
 
 def required_arity(fn: FunctionInfo) -> int:
-    """Params without defaults, excluding the bound self/cls of a method."""
-    return sum(not p.has_default for p in fn.params) - fn.is_method
+    """Params without defaults, excluding a method's bound self/cls."""
+    bound = fn.is_method and bool(fn.params) and fn.params[0].name in ("self", "cls")
+    return sum(not p.has_default for p in fn.params) - bound

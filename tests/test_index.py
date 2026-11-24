@@ -41,3 +41,10 @@ def test_nested_functions_skipped_and_arity_and_repo():
     fns = index_repo(Path("."), {"m.py": src, "bad.py": "def (:"})
     assert [f.qualname for f in fns] == ["f"]
     assert required_arity(fns[0]) == 2
+
+
+def test_method_arity_excludes_only_self_or_cls():
+    from slopgate.index import required_arity
+
+    src = "class C:\n    def m(self, a): pass\n    @staticmethod\n    def s(a): pass\n    @staticmethod\n    def z(): pass\n"
+    assert [required_arity(f) for f in index_source("m.py", src)] == [1, 1, 0]

@@ -12,7 +12,7 @@ class Changes:
 
 def classify(before: list[FunctionInfo], after: list[FunctionInfo]) -> Changes:
     old = {(f.module, f.qualname): f.body_key for f in before}
-    old_bodies = set(old.values())
+    old_bodies = {f.body_key for f in before}
     ch = Changes()
     for f in after:
         prev = old.get((f.module, f.qualname))

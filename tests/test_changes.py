@@ -34,3 +34,9 @@ def test_edited_body_is_changed_not_new():
 
 def test_deleted_functions_are_never_existing():
     assert classify([fn("a", "f", "k1")], []).existing == []
+
+
+def test_move_of_shadowed_duplicate_body_is_not_new():
+    before = [fn("a", "f", "k1"), fn("a", "f", "k2")]
+    ch = classify(before, [fn("b", "f", "k1")])
+    assert ch.new == [] and names(ch.existing) == ["f"]

@@ -139,3 +139,13 @@ def test_new_function_batches_run_once_across_candidates(repo, monkeypatch):
     assert r.findings == [] and len(set(names) - {"abs_mine"}) >= 2
     assert names.count("abs_mine") == 2  # one full batch and one rerun, shared by every candidate
     assert all(t is not None and t <= 5.0 for _, t in calls)
+
+
+def test_malformed_function_is_only_unjudgeable(repo):
+    import dataclasses
+    broken = dataclasses.replace(fn_named(repo, "abs_mine"), qualname="broken", source="")  # judge raises on it
+    ch = changes_with_new(repo, "square_pow")
+    ch.new.append(broken)
+    ch.existing.append(broken)
+    r = find_reinventions(repo, ch, fake_embed, sys.executable)
+    assert (r.new_count, r.judgeable_count, len(r.findings)) == (2, 1, 1)

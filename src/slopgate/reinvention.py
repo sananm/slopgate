@@ -80,13 +80,20 @@ def _cosine(a: list[float], b: list[float]) -> float:
     return sum(x * y for x, y in zip(a, b)) / d if d else 0.0
 
 
+def _judgeable(f: FunctionInfo) -> bool:
+    try:
+        return why_not_judgeable(f) is None
+    except Exception:  # one malformed function must not fail the whole check
+        return False
+
+
 def find_reinventions(repo: Path, changes: Changes, embed: Embed, interpreter: str,
                       budget_s: float = 20.0, k: int = 5) -> CheckResult:
     start = time.monotonic()
     over = lambda: time.monotonic() - start > budget_s  # noqa: E731
-    new = [f for f in changes.new if why_not_judgeable(f) is None]
+    new = [f for f in changes.new if _judgeable(f)]
     result = CheckResult(new_count=len(changes.new), judgeable_count=len(new))
-    pool = [f for f in changes.existing if why_not_judgeable(f) is None]
+    pool = [f for f in changes.existing if _judgeable(f)]
     vecs = _embeddings(repo, [f.source for f in new + pool], embed) if new and pool else {}
     for i, f in enumerate(new):
         memo: dict = {}

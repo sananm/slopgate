@@ -14,6 +14,7 @@ IndexError KeyError LookupError NotImplementedError OverflowError StopIteration 
 ValueError ZeroDivisionError
 """.split())
 
+_FRAME_ATTRS = {"gi_frame", "gi_code", "cr_frame", "cr_code", "ag_frame", "ag_code"}
 
 _COMPS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
 
@@ -62,8 +63,8 @@ def why_not_judgeable(fn: FunctionInfo) -> str | None:
             return "nested scope"
         if isinstance(n, (ast.Import, ast.ImportFrom)):
             return "denied: import"
-        # dunder access (e.g. ().__class__) can reach denied modules without naming them
-        if isinstance(n, ast.Attribute) and n.attr.startswith("__"):
+        # dunder access (e.g. ().__class__) can reach denied modules without naming them; frames reach builtins
+        if isinstance(n, ast.Attribute) and (n.attr.startswith(("__", "f_", "tb_")) or n.attr in _FRAME_ATTRS):
             return f"denied: {n.attr}"
     comps = [n for n in nodes if isinstance(n, _COMPS)]
     pure = (ast.Name, ast.Tuple, ast.List, ast.Starred, ast.expr_context)

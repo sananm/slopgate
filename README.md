@@ -17,19 +17,19 @@ slopgate runs as Claude Code hooks. When the agent finishes a turn, it checks th
 | `within_90_ci` / `within_95_ci` differ only by one number (`0.125` vs `0.25`) | `src/monitoring/accuracy.py` |
 | Accessors that only forward to a dict `.get` and are never called: `get_record`, `get_alert`, `get_cached_result` | `src/execution/rollback.py`, `src/monitoring/alerts.py`, `src/monitoring/health.py` |
 
-In total, `scan` reported 4 copy groups, 2 near-copy groups (the second is a pair of test fixtures that differ by one number) and 7 wrapper notes on this repo.
+In total, `scan` reported 4 copy groups, 2 near-copy groups (the second is a pair of test fixtures that differ by one number) and 5 wrapper notes on this repo.
 
-The same scan on two other private repos (55 Python files each) found 2 more copy groups, a model-factory function copied between two packages and an audio-slicing helper copied under a new name, plus 4 wrapper notes. A third model factory that reads a different setting was correctly kept apart.
+The same scan on two other private repos (55 Python files each) found 2 more copy groups, a model-factory function copied between two packages and an audio-slicing helper copied under a new name, plus 1 wrapper note. A third model factory that reads a different setting was correctly kept apart.
 
-Hand-check across all three repos (19 findings):
+Hand-check across all three repos (14 findings):
 
 | Kind | Reported | Genuine | Real but intentional | Wrong |
 |---|---|---|---|---|
 | copy | 6 groups | 6 | 0 | 0 |
 | near-copy | 2 groups | 1 | 1 (test fixtures, advisory only) | 0 |
-| wrapper note | 11 | 4 | 4 (`forward` on PyTorch modules and an async method a framework calls, so they have callers the name search cannot see) | 3 (each has exactly one call site, but the note says it has none) |
+| wrapper note | 6 | 5 | 1 (a FastAPI dependency function, used once in `Depends(...)`) | 0 |
 
-There were no false copy claims. The wrapper rule deliberately allows one call site, but the note's wording ("has no call sites found by name") is wrong in that case. Wrapper notes are advisory and never block.
+There were no false claims. Methods of classes that have a base class are not given wrapper notes, because a framework may call them where a name search cannot see it (`nn.Module.forward`, for example). That skips 4 framework methods in these repos, but it also drops one genuine forwarder in a repository subclass. Wrapper notes are advisory and never block.
 
 ## The checks
 
@@ -38,7 +38,7 @@ Each function is reduced to a normal form before comparing: the docstring, its n
 - **Copy (blocks).** A new or changed function whose normal form equals an existing one. The finding names the original and says to import it, move it to a shared helper, or move it into the shared base class.
 - **Near-copy (blocks).** A function equal to an existing one except for at most 3 numeric constants, at least one outside `{-1, 0, 1, 2}`, none used as an index. The finding says to add a parameter instead of copying.
 - **Reimplementation (blocks).** The M1 check, described below: a differently written function that agrees with an existing one on generated inputs.
-- **Wrapper notes (advisory).** A function whose body only passes its parameters unchanged to another call, and whose name appears at most once elsewhere in the repo. Decorated functions, dunders and names in `__all__` are never reported.
+- **Wrapper notes (advisory).** A function whose body only passes its parameters unchanged to another call, and that has at most one call site found by name, since a single-use wrapper should be inlined into its caller. Methods of classes with a base other than `object`, decorated functions, dunders and names in `__all__` are never reported.
 - **New-dependency notes (advisory).** New code that imports a third-party package the repo has never imported before.
 
 Copies and near-copies that involve a test file are advisory, never blocks. Advisory findings never block: they are added to the block reason when something else blocks, and shown with the summary line otherwise. Wrapper notes are only raised for functions added in the turn.

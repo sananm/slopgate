@@ -142,3 +142,15 @@ def test_index_shapes_covers_files_and_skips_nested_functions():
 def test_padded_functions_are_comparable_and_abstract_ones_are_not():
     assert shape(padded("def f(x): return x")).comparable
     assert not shape(padded("@abstractmethod\ndef f(x): return x")).comparable
+
+
+def _save(base, cls="C"):
+    return shapes_of("m.py", f"class {cls}({base}):\n    def save(self):\n        return super().save()\n")[0].exact_key
+
+
+def test_super_keys_differ_by_class_bases():
+    assert _save("A") != _save("B")
+
+
+def test_super_keys_match_for_identical_bases():
+    assert _save("A, M") == _save("A, M", cls="D")

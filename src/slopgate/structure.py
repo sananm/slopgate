@@ -262,8 +262,13 @@ def _is_stub(fn) -> bool:
     return all(map(stub, fn.body))
 
 
-def _digest(node: ast.AST) -> str:
-    return hashlib.sha256(ast.dump(node).encode()).hexdigest()
+def _digest(node: ast.AST, extra: str = "") -> str:
+    return hashlib.sha256((ast.dump(node) + extra).encode()).hexdigest()
+
+
+def _uses_super(fn) -> bool:
+    return any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "super" and not n.args and not n.keywords
+               for n in ast.walk(fn))
 
 
 def shapes_of(path: str, text: str) -> list[Shape]:
@@ -278,14 +283,16 @@ def shapes_of(path: str, text: str) -> list[Shape]:
         for node in body:
             if isinstance(node, _FUNCS):
                 norm = _normalize(node, mod, cls, prefix[:-1])
-                exact = _digest(norm)
+                bases = tuple(ast.unparse(b).split(".")[-1] for b in cls.bases) if cls else ()
+                extra = f"\nsuper:{bases!r}" if _uses_super(node) else ""  # zero-arg super() resolves via the class bases
+                exact = _digest(norm, extra)
                 nums = _Numbers()
-                near = _digest(nums.visit(norm))
+                near = _digest(nums.visit(norm), extra)
                 out.append(Shape(
                     path=path, qualname=prefix + node.name, module=mod.name,
                     line=node.lineno, end_line=node.end_lineno or node.lineno,
                     cls=cls.name if cls else None,
-                    bases=tuple(ast.unparse(b).split(".")[-1] for b in cls.bases) if cls else (),
+                    bases=bases,
                     exact_key=exact, near_key=near, consts=tuple(nums.consts),
                     comparable=sum(1 for _ in ast.walk(node)) >= _FLOOR and not _is_stub(node),
                 ))

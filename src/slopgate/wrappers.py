@@ -44,10 +44,23 @@ def _forwarded_call(fn) -> ast.Call | None:
     if not isinstance(v, ast.Call):
         return None
     a = fn.args
-    params = [p.arg for p in (*a.posonlyargs, *a.args, *a.kwonlyargs, a.vararg, a.kwarg) if p]
-    params = sorted(p for p in params if p not in ("self", "cls"))
-    passed = [x.value if isinstance(x, ast.Starred) else x for x in v.args] + [k.value for k in v.keywords]
-    if not all(isinstance(x, ast.Name) for x in passed) or sorted(x.id for x in passed) != params:
+    pos = [p.arg for p in (*a.posonlyargs, *a.args) if p.arg not in ("self", "cls")]
+    allp = set(pos) | {p.arg for p in a.kwonlyargs} | {p.arg for p in (a.vararg, a.kwarg) if p}
+    covered, i = set(), 0
+    for x in v.args:  # positional: same order as the parameters
+        if isinstance(x, ast.Starred) and isinstance(x.value, ast.Name) and a.vararg and x.value.id == a.vararg.arg:
+            covered.add(x.value.id)
+        elif isinstance(x, ast.Name) and i < len(pos) and x.id == pos[i]:
+            covered.add(x.id)
+            i += 1
+        else:
+            return None
+    for k in v.keywords:  # keyword: matched by name
+        name = k.arg or (a.kwarg.arg if a.kwarg else None)
+        if not isinstance(k.value, ast.Name) or k.value.id != name or name in covered:
+            return None
+        covered.add(name)
+    if covered != allp:
         return None
     return v
 

@@ -28,3 +28,11 @@ def test_exclusions(src):
 def test_async_await_forwarding_and_test_path_and_syntax_error():
     assert len(find_wrappers({("m.py", "w")}, {"m.py": "async def w(x):\n    'doc'\n    return await g(x)\n", "bad.py": "def ("})) == 1
     assert find_wrappers({("tests/t.py", "w")}, {"tests/t.py": "def w(x): return g(x)\n"}) == []
+
+
+def test_reordered_arguments_are_not_forwarding():
+    assert find_wrappers({("m.py", "w")}, {"m.py": "def w(a, b): return g(b, a)\n"}) == []
+
+
+def test_keyword_forwarding_by_name_is_noted():
+    assert len(find_wrappers({("m.py", "w")}, {"m.py": "def w(a, b): return g(a, b=b)\n"})) == 1

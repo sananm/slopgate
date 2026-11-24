@@ -42,6 +42,8 @@ def _repo_from_stdin() -> Path:
 
 
 def _shape_from(d) -> Shape:
+    if not (isinstance(d["bases"], list) and isinstance(d["consts"], list) and all(isinstance(c, list) for c in d["consts"])):
+        raise ValueError("bad cached shape")
     s = Shape(**{**d, "bases": tuple(d["bases"]), "consts": tuple((v, f) for v, f in d["consts"])})
     if not (all(isinstance(x, str) for x in (s.path, s.qualname, s.module, s.exact_key, s.near_key, *s.bases))
             and type(s.line) is int and type(s.end_line) is int and (s.cls is None or isinstance(s.cls, str))
@@ -55,7 +57,7 @@ def _shape_sets(repo: Path, *text_sets: dict[str, str]) -> list[list[Shape]]:
     path = state_dir(repo) / "shapes.json"
     try:
         cache = json.loads(path.read_text())
-    except (OSError, ValueError):  # untrusted on disk: ignore and rebuild
+    except (OSError, ValueError, RecursionError):  # untrusted on disk: ignore and rebuild (rewritten below)
         cache = {}
     cache = cache if isinstance(cache, dict) else {}
     memo: dict[str, list[Shape]] = {}
@@ -130,7 +132,7 @@ def _check(t0: float) -> dict:
                f"{len(result.findings)} findings, {result.skipped} skipped") + (" (running unsandboxed)" if sandbox_kind() == "none" else "")
     if block:
         return {"decision": "block", "reason": text, "systemMessage": summary}
-    return {"systemMessage": summary}
+    return {"systemMessage": "\n\n".join([summary, *notes])}
 
 
 def check() -> int:

@@ -280,23 +280,36 @@ def test_second_check_recomputes_no_shapes(fixture_git_repo, capsys, monkeypatch
     assert calls == []
 
 
-@pytest.mark.parametrize("junk", ["not json", "[1]", '{"k": 5}', '{"k": [{"path": 1}]}'])
-def test_corrupt_shape_cache_is_rebuilt(fixture_git_repo, capsys, junk):
+def test_deeply_nested_shape_cache_is_ignored_and_replaced(fixture_git_repo, capsys):
     run_hook(["start"], fixture_git_repo)
     paste_copy(fixture_git_repo)
-    (fixture_git_repo / ".git/slopgate/shapes.json").write_text(junk)
+    (fixture_git_repo / ".git/slopgate/shapes.json").write_text("[" * 1_000_000 + "]" * 1_000_000)  # json.loads raises RecursionError
+    run_hook(["check"], fixture_git_repo)
+    run_hook(["check"], fixture_git_repo)
+    first, second = (json.loads(line) for line in capsys.readouterr().out.splitlines())
+    assert first["decision"] == "block" and "internal error" not in second["systemMessage"]
+
+
+@pytest.mark.parametrize("forge", [{"line": "1"}, {"bases": "XYZ"}])
+def test_forged_cache_entry_under_real_key_is_recomputed(fixture_git_repo, capsys, forge):
+    import hashlib
+    run_hook(["start"], fixture_git_repo)
+    paste_copy(fixture_git_repo)
+    text = (fixture_git_repo / "b.py").read_text()
+    bad = {"path": "b.py", "qualname": pasted_name(), "module": "b", "line": 3, "end_line": 10, "cls": None,
+           "bases": [], "exact_key": "x", "near_key": "y", "consts": [], "comparable": False, **forge}
+    key = hashlib.sha256(f"b.py\0{text}".encode()).hexdigest()
+    (fixture_git_repo / ".git/slopgate/shapes.json").write_text(json.dumps({key: [bad]}))
     run_hook(["check"], fixture_git_repo)
     assert json.loads(capsys.readouterr().out)["decision"] == "block"
 
 
-def test_bad_cached_shape_is_recomputed(fixture_git_repo, capsys):
+def test_notes_reach_the_summary_when_not_blocking(fixture_git_repo, capsys):
     run_hook(["start"], fixture_git_repo)
-    paste_copy(fixture_git_repo)
+    add_forwarding_wrapper(fixture_git_repo)
     run_hook(["check"], fixture_git_repo)
-    p = fixture_git_repo / ".git/slopgate/shapes.json"
-    p.write_text(json.dumps({k: [{**v[0], "consts": "x"}] if v else v for k, v in json.loads(p.read_text()).items()}))
-    run_hook(["check"], fixture_git_repo)
-    assert "internal error" not in capsys.readouterr().out
+    msg = json.loads(capsys.readouterr().out)["systemMessage"]
+    assert msg.endswith("\n\nnote: wrap.py:4 join_paths only forwards to os.path.join and has no call sites found by name.")
 
 
 def test_scan_reports_existing_copies(fixture_git_repo_with_two_copies, capsys):

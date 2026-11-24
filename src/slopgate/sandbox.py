@@ -74,7 +74,7 @@ def _read_bounded(proc: subprocess.Popen, timeout: float) -> bytearray | None:
 
 def run_batch(repo: Path, fn: FunctionInfo, inputs: list[tuple], interpreter: str,
               timeout: float = _BATCH_TIMEOUT) -> list[Outcome] | None:
-    payload = pickle.dumps((str(repo.resolve()), fn.module, fn.qualname, inputs))
+    payload = pickle.dumps((str(repo.resolve()), fn.path, fn.module, fn.qualname, inputs))
     # never pass PYTHONHASHSEED: per-process hash randomization is how nondeterminism is detected
     env = {k: v for k, v in os.environ.items() if k != "PYTHONHASHSEED"} | {"PYTHONDONTWRITEBYTECODE": "1"}
     # an escaped setsid grandchild may still be writing in the workdir: cleanup must never raise

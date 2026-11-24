@@ -1,6 +1,7 @@
 """Runs one repo function on a batch of inputs. Executed by file path inside the OS sandbox."""
 import copy
 import importlib
+import inspect
 import io
 import os
 import pickle
@@ -56,7 +57,7 @@ def main() -> None:
     out = os.fdopen(os.dup(1), "wb")
     null = os.open(os.devnull, os.O_WRONLY)
     os.dup2(null, 1)  # keep the function's prints out of the result pipe
-    repo_root, module, qualname, inputs = pickle.load(sys.stdin.buffer)
+    repo_root, path, module, qualname, inputs = pickle.load(sys.stdin.buffer)
     if sys.platform.startswith("linux"):  # macOS does not enforce RLIMIT_AS
         import resource
         hard = resource.getrlimit(resource.RLIMIT_AS)[1]
@@ -66,6 +67,9 @@ def main() -> None:
     fn = importlib.import_module(module)
     for part in qualname.split("."):
         fn = getattr(fn, part)
+    # import names can resolve elsewhere (a stdlib module already loaded, two files with one module name)
+    if os.path.realpath(inspect.getsourcefile(fn)) != os.path.realpath(os.path.join(repo_root, path)):
+        sys.exit(1)  # nonzero exit: run_batch returns None, so no verdict
     signal.signal(signal.SIGALRM, _alarm)
     outcomes = [_checked(_call(fn, copy.deepcopy(args))) for args in inputs]
     out.write(pickle.dumps(outcomes, protocol=5))

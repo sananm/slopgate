@@ -91,3 +91,10 @@ def test_interpreter_falls_back_to_virtual_env(tmp_path, monkeypatch):
     py.touch(mode=0o755)
     monkeypatch.setenv("VIRTUAL_ENV", str(tmp_path / "ve"))
     assert pick_interpreter(tmp_path / "repo") == str(py)
+
+
+def test_repo_module_shadowed_by_stdlib_returns_none(tmp_path):
+    # the child has already imported stdlib copy, so "copy.copy" would resolve to the stdlib function
+    src = "def copy(x: list[int]) -> list[int]:\n    return [1]\n"
+    (tmp_path / "copy.py").write_text(src)
+    assert run_batch(tmp_path, index_source("copy.py", src)[0], [([5],)], sys.executable) is None

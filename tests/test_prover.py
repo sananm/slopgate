@@ -1,3 +1,4 @@
+import subprocess
 import sys
 
 from slopgate import prover
@@ -84,3 +85,11 @@ def test_forged_or_malformed_batches_get_no_verdict(fixture_repo, monkeypatch):
         assert prove(fixture_repo, f, g, sys.executable).equivalent is None
     monkeypatch.setattr(prover, "run_batch", _forged(lambda ins: [("return", 0, a) for a in ins]))
     assert prove(fixture_repo, f, g, sys.executable).equivalent is True  # control: well-formed batches still prove
+
+
+def test_hypothesis_never_writes_into_the_working_directory(fixture_repo, tmp_path):
+    # a fresh process: Hypothesis caches its storage dir on first use, so in-process the pytest root wins
+    code = ("import sys; from slopgate.index import index_source; from slopgate.prover import generate_inputs; "
+            "generate_inputs(next(f for f in index_source('funcs.py', open(sys.argv[1]).read()) if f.qualname == 'abs_mine'))")
+    subprocess.run([sys.executable, "-c", code, str(fixture_repo / "funcs.py")], cwd=tmp_path, check=True)
+    assert not (tmp_path / ".hypothesis").exists()

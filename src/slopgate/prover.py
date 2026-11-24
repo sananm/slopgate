@@ -1,14 +1,19 @@
 import builtins
+import tempfile
 import typing
 from dataclasses import dataclass
 from pathlib import Path
 
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
+from hypothesis.configuration import set_hypothesis_home_dir
 
 from slopgate.index import FunctionInfo, required_arity
 from slopgate.judge import _CONTAINERS, _SCALARS, why_not_judgeable
 from slopgate.sandbox import Outcome, run_batch
+
+# Hypothesis otherwise writes .hypothesis/ into the cwd (the user's repo); state stays out of the working tree.
+set_hypothesis_home_dir(tempfile.mkdtemp(prefix="slopgate-hypothesis-"))
 
 _N = 200
 _MIN_RETURNS = 50

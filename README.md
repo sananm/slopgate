@@ -6,13 +6,19 @@ slopgate runs as Claude Code hooks. When the agent finishes a turn, it looks for
 
 ## What a finding looks like
 
-Simulated agent edit on a real codebase (a private FastAPI/ML repo, 102 Python files). `clamp` already existed in `src/utils/numeric.py`; the edit appended a differently written equivalent to `src/decision/capacity_model.py`. Exact Stop hook output:
+Simulated agent edit on a real codebase (a private FastAPI/ML repo, 102 Python files). The repo had no function slopgate could judge, so a `clamp` helper (`src/utils/numeric.py`) was added to a throwaway copy before the simulated agent edit, which then appended a differently written equivalent to `src/decision/capacity_model.py`. Exact Stop hook output:
 
 ```json
 {"decision": "block", "reason": "src/decision/capacity_model.py:532 bound_utilization reimplements src/utils/numeric.py:4 clamp\n  (identical on 200 generated inputs). Delete bound_utilization (3 lines)\n  and call clamp."}
 ```
 
-Claude Code feeds `reason` back to the agent, which then deletes the duplicate and calls the existing function. A first attempt written as `max(floor, min(x, ceiling))` was not flagged: it differs from `clamp` when `floor > ceiling`, and the prover found that.
+In the intended flow, the reason is fed back to the agent so it can reuse the existing function; no real agent session was run for this example. A first attempt written as `max(floor, min(x, ceiling))` was not flagged: it differs from `clamp` when `floor > ceiling`, and the prover found that.
+
+### Coverage on that repo
+
+Measured on the same repo before the `clamp` helper was added: 1,546 functions in 102 files, 0 judgeable. 1,110 are methods and 361 are async. The remaining 74 plain functions were all rejected: 36 for reading names outside the allowed set (11 use `global`, 5 import, 4 use `argparse`, the rest module state or other modules), 25 for annotations the prover cannot generate (7 are `*args`/`**kwargs`), 7 are decorated, 5 are unannotated, 1 is a generator.
+
+Without the planted helper, slopgate would have judged nothing in this repo. That is the current limitation: it only acts on plain, builtin-typed functions, and methods and async functions are the obvious next work.
 
 ## Install
 
@@ -21,7 +27,7 @@ pip install -e .
 slopgate install <repo>
 ```
 
-`slopgate install` adds a `UserPromptSubmit` hook (`slopgate start`, snapshots the repo) and a `Stop` hook (`slopgate check`) to `<repo>/.claude/settings.json`, and downloads the embedding model (a few hundred MB) once. The `slopgate` command must be on the `PATH` Claude Code runs with. Python 3.11+. The repo must be a git repository. If `<repo>/.venv` exists, the functions run on its interpreter, so imports resolve.
+`slopgate install` adds a `UserPromptSubmit` hook (`slopgate start`, snapshots the repo) and a `Stop` hook (`slopgate check`) to `<repo>/.claude/settings.json`, and does a one-time download of the embedding model. The `slopgate` command must be on the `PATH` Claude Code runs with. Python 3.11+. The repo must be a git repository. If `<repo>/.venv` exists, the functions run on its interpreter, so imports resolve.
 
 ## What is judged
 
@@ -33,11 +39,9 @@ Not judged: methods, async functions, generators, decorated functions, and anyth
 
 Honest limit: "identical" means identical on the generated inputs (200 in the example), not a formal proof.
 
-On the private repo above, 0 of 1,546 functions were judgeable (1,110 methods, 361 async); slopgate can only act on code written in the style it judges.
-
 ## Sandbox
 
-Both functions run in a child process with network access denied and file writes restricted to a temporary directory (`sandbox-exec` on macOS, `bwrap` on Linux), with a time limit per batch and a cap on output size. If neither is available, slopgate still runs, unsandboxed, and says so in its status line. Only code that passes the checks above is ever executed.
+Both functions run in a child process with network access denied and file writes restricted to a temporary directory (`sandbox-exec` on macOS, `bwrap` on Linux), with a time limit per batch and a cap on output size. If neither is available, slopgate still runs, unsandboxed, and says so in its status line. The judgeability rules are a pre-filter, not a security boundary; the OS sandbox is what contains execution.
 
 ## Limits of this milestone
 

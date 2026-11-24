@@ -123,3 +123,19 @@ def test_model_cache_is_outside_the_temp_dir(monkeypatch, xdg):
     default_embed()
     want = Path(xdg) if xdg else Path.home() / ".cache"
     assert seen == {"a": (MODEL,), "k": {"cache_dir": str(want / "slopgate")}}
+
+
+def test_new_function_batches_run_once_across_candidates(repo, monkeypatch):
+    from slopgate import prover
+    calls = []
+
+    def fake_run(repo_, fn, inputs, interpreter, timeout=None):
+        calls.append((fn.qualname, timeout))
+        return [("return", int(fn.qualname == "abs_mine"), a) for a in inputs]  # every candidate differs
+
+    monkeypatch.setattr(prover, "run_batch", fake_run)
+    r = find_reinventions(repo, changes_with_new(repo, "abs_mine"), fake_embed, sys.executable, budget_s=5.0)
+    names = [q for q, _ in calls]
+    assert r.findings == [] and len(set(names) - {"abs_mine"}) >= 2
+    assert names.count("abs_mine") == 2  # one full batch and one rerun, shared by every candidate
+    assert all(t is not None and t <= 5.0 for _, t in calls)

@@ -64,7 +64,7 @@ def test_inputs_are_deterministic(fixture_repo):
 
 
 def _forged(outcomes_for):
-    return lambda repo, fn, inputs, interpreter: outcomes_for(inputs)
+    return lambda repo, fn, inputs, interpreter, **k: outcomes_for(inputs)
 
 
 def test_forged_or_malformed_batches_get_no_verdict(fixture_repo, monkeypatch):
@@ -133,3 +133,10 @@ def test_generated_inputs_are_bounded():
 def test_repeat_inputs_stay_small():
     rep = index_source("m.py", "def rep(s: str, n: int) -> str:\n    return s * n\n")[0]
     assert max(len(s) * abs(n) for s, n in generate_inputs(rep)) <= 10**6
+
+
+def test_rerun_is_skipped_when_the_full_batch_fails(fixture_repo, monkeypatch):
+    calls = []
+    monkeypatch.setattr(prover, "run_batch", lambda *a, **k: calls.append(1))
+    assert prove(fixture_repo, fn_named(fixture_repo, "abs_mine"), fn_named(fixture_repo, "abs_mine"), sys.executable).equivalent is None
+    assert calls == [1]

@@ -51,9 +51,9 @@ def _command(workdir: str, interpreter: str) -> list[str]:
     return [interpreter, _CHILD]
 
 
-def _read_bounded(proc: subprocess.Popen) -> bytearray | None:
+def _read_bounded(proc: subprocess.Popen, timeout: float) -> bytearray | None:
     """Child stdout, or None past the batch deadline or over _MAX_OUTPUT (never holds more than cap + 1 bytes)."""
-    deadline = time.monotonic() + _BATCH_TIMEOUT
+    deadline = time.monotonic() + timeout
     fd, buf = proc.stdout.fileno(), bytearray()
     while True:
         left = deadline - time.monotonic()
@@ -72,7 +72,8 @@ def _read_bounded(proc: subprocess.Popen) -> bytearray | None:
     return buf
 
 
-def run_batch(repo: Path, fn: FunctionInfo, inputs: list[tuple], interpreter: str) -> list[Outcome] | None:
+def run_batch(repo: Path, fn: FunctionInfo, inputs: list[tuple], interpreter: str,
+              timeout: float = _BATCH_TIMEOUT) -> list[Outcome] | None:
     payload = pickle.dumps((str(repo.resolve()), fn.module, fn.qualname, inputs))
     # never pass PYTHONHASHSEED: per-process hash randomization is how nondeterminism is detected
     env = {k: v for k, v in os.environ.items() if k != "PYTHONHASHSEED"} | {"PYTHONDONTWRITEBYTECODE": "1"}
@@ -84,7 +85,7 @@ def run_batch(repo: Path, fn: FunctionInfo, inputs: list[tuple], interpreter: st
         proc = subprocess.Popen(_command(workdir, interpreter), cwd=workdir, env=env, stdin=stdin,
                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
         try:
-            out = _read_bounded(proc)
+            out = _read_bounded(proc, timeout)
             if out is None:
                 return None
         finally:

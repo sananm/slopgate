@@ -1,6 +1,7 @@
 import builtins
 import pickle
 import tempfile
+import time
 import types
 import typing
 from dataclasses import dataclass
@@ -12,7 +13,7 @@ from hypothesis.configuration import set_hypothesis_home_dir
 
 from slopgate.index import FunctionInfo, required_arity
 from slopgate.judge import _CONTAINERS, _SCALARS, why_not_judgeable
-from slopgate.sandbox import Outcome, run_batch
+from slopgate.sandbox import _BATCH_TIMEOUT, Outcome, run_batch
 
 # Hypothesis otherwise writes .hypothesis/ into the cwd (the user's repo); state stays out of the working tree.
 set_hypothesis_home_dir(tempfile.mkdtemp(prefix="slopgate-hypothesis-"))
@@ -100,14 +101,33 @@ def _well_formed(batch: object, n: int) -> bool:
     )
 
 
-def prove(repo: Path, f: FunctionInfo, g: FunctionInfo, interpreter: str) -> Verdict:
+def prove(repo: Path, f: FunctionInfo, g: FunctionInfo, interpreter: str,
+          deadline: float | None = None, memo: dict | None = None) -> Verdict:
+    """deadline: time.monotonic() value no batch may run past. memo: per-f dict that shares f's outcomes across candidates."""
     try:
-        return _prove(repo, f, g, interpreter)
+        return _prove(repo, f, g, interpreter, deadline, memo)
     except Exception as e:  # never raises: includes RecursionError from deeply nested values
         return Verdict(None, 0, f"error: {type(e).__name__}")
 
 
-def _prove(repo: Path, f: FunctionInfo, g: FunctionInfo, interpreter: str) -> Verdict:
+def _outcomes(repo: Path, fn: FunctionInfo, inputs: list[tuple], interpreter: str, deadline: float | None) -> list | str:
+    """fn's checked outcomes on inputs, or why there are none."""
+    timeout = lambda: _BATCH_TIMEOUT if deadline is None else max(0.0, min(_BATCH_TIMEOUT, deadline - time.monotonic()))  # noqa: E731
+    full = run_batch(repo, fn, inputs, interpreter, timeout=timeout())
+    if not _well_formed(full, _N):
+        return f"{fn.qualname}: no outcomes"
+    rerun = run_batch(repo, fn, inputs[:_RERUN], interpreter, timeout=timeout())
+    if not _well_formed(rerun, _RERUN):
+        return f"{fn.qualname}: no outcomes"
+    if any(o[0] in ("timeout", "error") for o in full + rerun):
+        return f"{fn.qualname}: timeout or error"
+    if not all(same_outcome(a, b) for a, b in zip(full, rerun)):
+        return f"{fn.qualname}: nondeterministic"
+    return full
+
+
+def _prove(repo: Path, f: FunctionInfo, g: FunctionInfo, interpreter: str,
+           deadline: float | None, memo: dict | None) -> Verdict:
     for fn in (f, g):
         if why := why_not_judgeable(fn):
             return Verdict(None, 0, f"{fn.qualname}: {why}")
@@ -121,15 +141,15 @@ def _prove(repo: Path, f: FunctionInfo, g: FunctionInfo, interpreter: str) -> Ve
         return Verdict(None, len(inputs), "too few inputs")
     runs = []
     for fn in (f, g):
-        full = run_batch(repo, fn, inputs, interpreter)
-        rerun = run_batch(repo, fn, inputs[:_RERUN], interpreter)
-        if not (_well_formed(full, _N) and _well_formed(rerun, _RERUN)):
-            return Verdict(None, _N, f"{fn.qualname}: no outcomes")
-        if any(o[0] in ("timeout", "error") for o in full + rerun):
-            return Verdict(None, _N, f"{fn.qualname}: timeout or error")
-        if not all(same_outcome(a, b) for a, b in zip(full, rerun)):
-            return Verdict(None, _N, f"{fn.qualname}: nondeterministic")
-        runs.append(full)
+        if fn is f and memo is not None and "f" in memo:
+            got = memo["f"]  # inputs depend only on f, so f's outcomes are the same for every candidate
+        else:
+            got = _outcomes(repo, fn, inputs, interpreter, deadline)
+            if fn is f and memo is not None:
+                memo["f"] = got
+        if isinstance(got, str):
+            return Verdict(None, _N, got)
+        runs.append(got)
     if sum(a[0] == b[0] == "return" for a, b in zip(*runs)) < _MIN_RETURNS:
         return Verdict(None, _N, "too few normal returns")
     for i, (a, b) in enumerate(zip(*runs)):

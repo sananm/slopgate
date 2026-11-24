@@ -89,13 +89,14 @@ def find_reinventions(repo: Path, changes: Changes, embed: Embed, interpreter: s
     pool = [f for f in changes.existing if why_not_judgeable(f) is None]
     vecs = _embeddings(repo, [f.source for f in new + pool], embed) if new and pool else {}
     for i, f in enumerate(new):
+        memo: dict = {}
         cands = sorted((g for g in pool if required_arity(g) == required_arity(f)),
                        key=lambda g: -_cosine(vecs[f.source], vecs[g.source]))[:k]
         for g in cands:
             if over():
                 result.skipped = len(new) - i  # this function is unfinished, plus all after it
                 return result
-            v = prove(repo, f, g, interpreter)
+            v = prove(repo, f, g, interpreter, deadline=start + budget_s, memo=memo)
             if v.equivalent is True:
                 result.findings.append(Finding(f, g, v.inputs))
                 break

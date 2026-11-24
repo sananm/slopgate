@@ -1,6 +1,7 @@
 """Clone findings: which new function copies or near-copies which original, and the text the agent sees."""
 from collections import defaultdict
 from dataclasses import dataclass
+from itertools import islice
 from typing import Literal
 
 from slopgate.structure import Shape, is_test_path
@@ -62,7 +63,8 @@ def find_clones(candidates: list[Shape], pool: list[Shape], before: list[Shape])
         kind = "copy"
         if orig is None:
             kind = "near"
-            for o in nears.get(c.near_key, ()):
+            # shortcut: near search examines at most 50 bucket entries per candidate; raise if huge same-shape buckets matter
+            for o in islice(nears.get(c.near_key, ()), 50):
                 if _id(o) != _id(c) and o.exact_key != c.exact_key and (diff := _diff(c, o)):
                     orig = o
                     break

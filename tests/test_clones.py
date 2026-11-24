@@ -126,3 +126,10 @@ def test_2000_functions_match_under_half_second():
 def test_2000_functions_cold_index_under_4s():
     t = time.perf_counter(); index_shapes(_texts())
     assert time.perf_counter() - t < 4.0
+
+
+def test_huge_bucket_with_no_near_pairs_is_bounded():
+    shapes = [near(f"m{i}.py", tuple(range(10 + 5 * i, 15 + 5 * i))) for i in range(2000)]
+    t = time.perf_counter()
+    assert find_clones(shapes, shapes, []) == []
+    assert time.perf_counter() - t < 0.5

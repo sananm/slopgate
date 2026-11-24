@@ -60,3 +60,9 @@ def test_import_failure_returns_none(fixture_repo):
 def test_interpreter_prefers_repo_venv(tmp_path):
     venv_python(tmp_path)  # creates tmp_path/.venv/bin/python
     assert pick_interpreter(tmp_path) == str(tmp_path / ".venv/bin/python")
+
+
+def test_child_never_inherits_pythonhashseed(fixture_repo, monkeypatch):
+    monkeypatch.setenv("PYTHONHASHSEED", "0")
+    fn = fn_named(fixture_repo, "hash_mod")
+    assert run_batch(fixture_repo, fn, [("slopgate",)], sys.executable) != run_batch(fixture_repo, fn, [("slopgate",)], sys.executable)

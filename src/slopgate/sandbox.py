@@ -45,7 +45,8 @@ def _command(workdir: str, interpreter: str) -> list[str]:
 
 def run_batch(repo: Path, fn: FunctionInfo, inputs: list[tuple], interpreter: str) -> list[Outcome] | None:
     payload = pickle.dumps((str(repo.resolve()), fn.module, fn.qualname, inputs))
-    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+    # never pass PYTHONHASHSEED: per-process hash randomization is how nondeterminism is detected
+    env = {k: v for k, v in os.environ.items() if k != "PYTHONHASHSEED"} | {"PYTHONDONTWRITEBYTECODE": "1"}
     with tempfile.TemporaryDirectory() as tmp:
         workdir = os.path.realpath(tmp)  # sandbox-exec matches real paths (/var -> /private/var)
         proc = subprocess.Popen(_command(workdir, interpreter), cwd=workdir, env=env, stdin=subprocess.PIPE,

@@ -22,3 +22,7 @@ def _write(path):
 
 def sneaky_write(path):
     _write(path)
+
+
+def hash_mod(s: str) -> int:
+    return hash(s) % 1000003

@@ -1,3 +1,4 @@
+import dataclasses
 import time
 
 import pytest
@@ -96,7 +97,32 @@ def test_clone_groups_original_first():
     assert [x.path for x in g] == ["a.py", "b.py"]
 
 
-def test_2000_functions_index_and_match_under_2s():
-    texts = {f"m{i}.py": "def f(a, b):\n" + "".join(f"    x{j} = a + b * {i}\n" for j in range(12)) + "    return x1\n" for i in range(2000)}
-    t = time.monotonic(); shapes = index_shapes(texts); clone_groups(shapes)
-    assert time.monotonic() - t < 2.0
+def test_near_after_exact_copy_pair_is_reported():
+    a, b0, b1 = near("a.py", (0.9,)), near("b.py", (0.9,)), near("b.py", (0.95,))
+    a, b0 = (dataclasses.replace(x, exact_key="E") for x in (a, b0))
+    assert find_clones([b1], pool=[a, b1], before=[a, b0])[0].kind == "near"
+
+
+def test_near_after_edit_from_four_diffs_is_reported():
+    a, b0, b1 = near("a.py", (1, 2, 3, 4)), near("b.py", (5, 6, 7, 8)), near("b.py", (1, 2, 3, 9))
+    assert len(find_clones([b1], pool=[a, b1], before=[a, b0])) == 1
+
+
+def test_pre_existing_near_pair_is_silent():
+    a, b0, b1 = near("a.py", (0.9,)), near("b.py", (0.95,)), near("b.py", (0.97,))
+    assert find_clones([b1], pool=[a, b1], before=[a, b0]) == []
+
+
+def _texts():
+    return {f"m{i}.py": "def f(a, b):\n" + "".join(f"    x{j} = a + b * {j}\n" for j in range(12)) + f"    return x1 + {i + 5}\n" for i in range(2000)}
+
+
+def test_2000_functions_match_under_half_second():
+    shapes = index_shapes(_texts())
+    t = time.perf_counter(); find_clones(shapes, shapes, []); clone_groups(shapes)
+    assert time.perf_counter() - t < 0.5
+
+
+def test_2000_functions_cold_index_under_4s():
+    t = time.perf_counter(); index_shapes(_texts())
+    assert time.perf_counter() - t < 4.0

@@ -49,30 +49,30 @@ def _base(new: Shape, orig: Shape) -> str | None:
 
 def find_clones(candidates: list[Shape], pool: list[Shape], before: list[Shape]) -> list[Clone]:
     old = {_id(s): s for s in before}
-    exact, nears = _by(pool, "exact_key"), _by(pool, "near_key")
+
+    def ordered(shapes, attr):  # per bucket: shapes present in before first, then the rest, each by (path, qualname)
+        return {k: sorted(g, key=lambda o: (_id(o) not in old, _id(o))) for k, g in _by(shapes, attr).items()}
+    exact, nears = ordered(pool, "exact_key"), ordered(pool, "near_key")
     out = []
     for c in candidates:
         if not c.comparable:
             continue
-        kind, attr = "copy", "exact_key"
-        others = [o for o in exact.get(c.exact_key, ()) if _id(o) != _id(c)]
-        diffs = {}
-        if not others:
-            kind, attr = "near", "near_key"
+        diff = None
+        orig = next((o for o in exact.get(c.exact_key, ()) if _id(o) != _id(c)), None)
+        kind = "copy"
+        if orig is None:
+            kind = "near"
             for o in nears.get(c.near_key, ()):
-                if _id(o) != _id(c) and o.exact_key != c.exact_key and (d := _diff(c, o)):
-                    diffs[_id(o)] = d
-            others = [o for o in nears.get(c.near_key, ()) if _id(o) in diffs]
-        if not others:
-            continue
-        seen = [o for o in others if _id(o) in old]
-        orig = min(seen or others, key=_id)
-        if not seen and _id(c) < _id(orig):
-            continue  # c is itself the first of its group, so the others point at it
-        prev = old.get(_id(c))
-        if prev and _id(orig) in old and getattr(prev, attr) == getattr(old[_id(orig)], attr):
+                if _id(o) != _id(c) and o.exact_key != c.exact_key and (diff := _diff(c, o)):
+                    orig = o
+                    break
+        if orig is None or (_id(orig) not in old and _id(c) < _id(orig)):
+            continue  # no original, or c is itself the first of its group
+        prev, prev_o = old.get(_id(c)), old.get(_id(orig))
+        if prev and prev_o and (prev.exact_key == prev_o.exact_key if kind == "copy" else
+                                prev.exact_key != prev_o.exact_key and prev.near_key == prev_o.near_key and _diff(prev, prev_o)):
             continue  # relation already existed
-        out.append(Clone(kind, c, orig, diffs.get(_id(orig)), _base(c, orig),
+        out.append(Clone(kind, c, orig, diff, _base(c, orig),
                          not (is_test_path(c.path) or is_test_path(orig.path))))
     return out
 

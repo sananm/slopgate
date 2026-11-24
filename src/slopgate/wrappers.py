@@ -86,22 +86,26 @@ def _mentions(trees, name: str) -> int:
 
 
 def find_wrappers(candidate_paths_qualnames: set[tuple[str, str]], texts: dict[str, str]) -> list[Wrapper]:
-    trees = _parse(texts)
-    exported = _all_names(trees)
-    found = []
+    # forwarders first from the candidates' own files; the whole repo is parsed only to count their call sites
+    trees = _parse({p: texts[p] for p, _ in candidate_paths_qualnames if p in texts and not is_test_path(p)})
+    hits = []
     for path, qual in sorted(candidate_paths_qualnames):
-        if path not in trees or is_test_path(path):
+        if path not in trees:
             continue
         fn, sub = dict(_defs(trees[path].body)).get(qual, (None, False))
         name = qual.rsplit(".", 1)[-1]
         # subclass methods may be called by a framework (nn.Module.forward), which a name search cannot see
-        if fn is None or sub or fn.decorator_list or name in exported or (name.startswith("__") and name.endswith("__")):
+        if fn is None or sub or fn.decorator_list or (name.startswith("__") and name.endswith("__")):
             continue
-        call = _forwarded_call(fn)
-        # the def itself is not an ast.Name/Attribute/Constant, so it is never counted
-        if call and _mentions(trees, name) <= 1:
-            found.append(Wrapper(path, fn.lineno, name, ast.unparse(call.func)))
-    return found
+        if call := _forwarded_call(fn):
+            hits.append((path, fn, name, call))
+    if not hits:
+        return []
+    trees.update(_parse({p: t for p, t in texts.items() if p not in trees}))
+    exported = _all_names(trees)
+    # the def itself is not an ast.Name/Attribute/Constant, so it is never counted
+    return [Wrapper(path, fn.lineno, name, ast.unparse(call.func)) for path, fn, name, call in hits
+            if name not in exported and _mentions(trees, name) <= 1]
 
 
 def format_wrapper(w: Wrapper) -> str:

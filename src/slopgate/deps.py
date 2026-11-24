@@ -40,10 +40,13 @@ def _first_party(after: dict[str, str]) -> set[str]:
 
 
 def find_new_deps(candidate_paths: set[str], after: dict[str, str], before: dict[str, str]) -> list[NewDep]:
-    seen = {m for t in _parse(before).values() for m in _imports(t)}
-    skip = seen | _first_party(after) | sys.stdlib_module_names
+    skip = _first_party(after) | sys.stdlib_module_names
     trees = _parse({p: after[p] for p in sorted(candidate_paths) if p in after})
-    return [NewDep(p, line, m) for p, t in trees.items() for m, line in sorted(_imports(t).items(), key=lambda kv: kv[1]) if m not in skip]
+    found = [NewDep(p, line, m) for p, t in trees.items() for m, line in sorted(_imports(t).items(), key=lambda kv: kv[1]) if m not in skip]
+    if not found:
+        return []  # nothing left to check against before, so skip parsing it
+    seen = {m for t in _parse(before).values() for m in _imports(t)}
+    return [d for d in found if d.module not in seen]
 
 
 def format_new_dep(d: NewDep) -> str:

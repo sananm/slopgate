@@ -43,3 +43,12 @@ def test_subclass_methods_are_skipped():
     assert find_wrappers({("m.py", "M.forward")}, {"m.py": "import torch.nn as nn\nclass M(nn.Module):\n" + body}) == []
     assert len(find_wrappers({("m.py", "M.forward")}, {"m.py": "class M:\n" + body})) == 1
     assert len(find_wrappers({("m.py", "M.forward")}, {"m.py": "class M(object):\n" + body})) == 1
+
+
+def test_repo_is_not_parsed_when_no_candidate_forwards(monkeypatch):
+    import slopgate.wrappers
+    parsed, real = [], slopgate.wrappers._parse
+    monkeypatch.setattr("slopgate.wrappers._parse", lambda texts: parsed.extend(texts) or real(texts))
+    texts = {"m.py": "def w(x): return g(x + 1)\n", "a.py": "def h(): pass\n", "b.py": "w(1)\n"}
+    assert find_wrappers({("m.py", "w")}, texts) == []
+    assert parsed == ["m.py"]

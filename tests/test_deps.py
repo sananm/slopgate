@@ -20,3 +20,12 @@ def test_stdlib_relative_and_first_party_are_ignored(src):
 
 def test_syntax_error_file_is_skipped():
     assert find_new_deps({"a.py"}, {"a.py": "import (\n"}, {}) == []
+
+
+def test_before_is_not_parsed_when_every_import_is_stdlib_or_first_party(monkeypatch):
+    import slopgate.deps
+    parsed, real = [], slopgate.deps._parse
+    monkeypatch.setattr("slopgate.deps._parse", lambda texts: parsed.extend(texts) or real(texts))
+    after = {"a.py": "import json\nfrom mypkg import y\n", "src/mypkg/__init__.py": ""}
+    assert find_new_deps({"a.py"}, after, {"old.py": "import numpy\n"}) == []
+    assert parsed == ["a.py"]

@@ -5,7 +5,7 @@ from slopgate.wrappers import find_wrappers, format_wrapper
 
 def test_forwarding_accessor_with_no_callers_is_noted():
     w, = find_wrappers({("m.py", "C.get_record")}, {"m.py": "class C:\n    def get_record(self, k):\n        return self._records.get(k)\n"})
-    assert format_wrapper(w) == "note: m.py:2 get_record only forwards to self._records.get and has no call sites found by name."
+    assert format_wrapper(w) == "note: m.py:2 get_record only forwards to self._records.get and has at most one call site found by name."
 
 
 def test_called_twice_is_not_noted():
@@ -36,3 +36,10 @@ def test_reordered_arguments_are_not_forwarding():
 
 def test_keyword_forwarding_by_name_is_noted():
     assert len(find_wrappers({("m.py", "w")}, {"m.py": "def w(a, b): return g(a, b=b)\n"})) == 1
+
+
+def test_subclass_methods_are_skipped():
+    body = "    def forward(self, x):\n        return self.net(x)\n"
+    assert find_wrappers({("m.py", "M.forward")}, {"m.py": "import torch.nn as nn\nclass M(nn.Module):\n" + body}) == []
+    assert len(find_wrappers({("m.py", "M.forward")}, {"m.py": "class M:\n" + body})) == 1
+    assert len(find_wrappers({("m.py", "M.forward")}, {"m.py": "class M(object):\n" + body})) == 1

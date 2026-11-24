@@ -309,7 +309,7 @@ def test_notes_reach_the_summary_when_not_blocking(fixture_git_repo, capsys):
     add_forwarding_wrapper(fixture_git_repo)
     run_hook(["check"], fixture_git_repo)
     msg = json.loads(capsys.readouterr().out)["systemMessage"]
-    assert msg.endswith("\n\nnote: wrap.py:4 join_paths only forwards to os.path.join and has no call sites found by name.")
+    assert msg.endswith("\n\nnote: wrap.py:4 join_paths only forwards to os.path.join and has at most one call site found by name.")
 
 
 def test_scan_reports_existing_copies(fixture_git_repo_with_two_copies, capsys):

@@ -224,13 +224,14 @@ def test_rename_local_in_one_of_existing_copies_does_not_block(fixture_git_repo_
 
 
 def test_copy_skips_the_prover(fixture_git_repo, capsys, monkeypatch):
-    seen = []
-    monkeypatch.setattr("slopgate.cli.find_reinventions", record_new_names(seen))
+    seen, calls = [], []
+    fake = record_new_names(seen)
+    monkeypatch.setattr("slopgate.cli.find_reinventions", lambda *a, **k: calls.append(1) or fake(*a, **k))
     run_hook(["start"], fixture_git_repo)
     paste_copy(fixture_git_repo)
     run_hook(["check"], fixture_git_repo)
     assert json.loads(capsys.readouterr().out)["decision"] == "block"
-    assert pasted_name() not in seen
+    assert calls and pasted_name() not in seen
 
 
 def test_let_through_copy_is_shown_in_summary(fixture_git_repo, capsys):

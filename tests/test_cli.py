@@ -9,6 +9,7 @@ import pytest
 from conftest import git_commit_all
 from slopgate.cli import main
 from test_reinvention import fake_embed
+from test_snapshot import add_worktree
 from test_sandbox import fixture_repo  # noqa: F401
 
 
@@ -75,6 +76,14 @@ def test_fixed_reinvention_counts_as_resolved(fixture_git_repo, capsys):
     outs = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert "systemMessage" in outs[-1]
     assert (last_stats(fixture_git_repo)["round"], last_stats(fixture_git_repo)["resolved"]) == (2, 1)
+
+
+def test_blocks_inside_a_git_worktree(fixture_git_repo, tmp_path, capsys):
+    wt = add_worktree(fixture_git_repo, tmp_path / "wt")
+    run_hook(["start"], wt)
+    add_reinvention(wt)
+    assert run_hook(["check"], wt) == 0
+    assert json.loads(capsys.readouterr().out)["decision"] == "block"
 
 
 def test_clean_task_allows_with_summary(fixture_git_repo, capsys):

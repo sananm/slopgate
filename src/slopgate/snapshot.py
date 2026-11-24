@@ -13,7 +13,9 @@ class Snapshot:
 
 
 def state_dir(repo: Path) -> Path:
-    d = repo / ".git" / "slopgate"
+    # a worktree's .git is a file, so ask git for the real git dir
+    git = subprocess.run(["git", "-C", str(repo), "rev-parse", "--absolute-git-dir"], capture_output=True, text=True)
+    d = (Path(git.stdout.strip()) if git.returncode == 0 else repo / ".git") / "slopgate"
     d.mkdir(parents=True, exist_ok=True)
     return d
 

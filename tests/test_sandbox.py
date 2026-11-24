@@ -1,9 +1,12 @@
+import pickle
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 import pytest
 
+from slopgate.child import safe_loads
 from slopgate.index import index_source
 from slopgate.sandbox import pick_interpreter, run_batch, sandbox_kind
 
@@ -66,3 +69,25 @@ def test_child_never_inherits_pythonhashseed(fixture_repo, monkeypatch):
     monkeypatch.setenv("PYTHONHASHSEED", "0")
     fn = fn_named(fixture_repo, "hash_mod")
     assert run_batch(fixture_repo, fn, [("slopgate",)], sys.executable) != run_batch(fixture_repo, fn, [("slopgate",)], sys.executable)
+
+
+def test_setsid_grandchild_cannot_crash_the_caller(fixture_repo, tmp_path, monkeypatch):
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))  # the escaped grandchild may leak the workdir here
+    run_batch(fixture_repo, fn_named(fixture_repo, "setsid_churn"), [(1,)], sys.executable)
+
+
+def test_unpickler_refuses_bytearray_global():
+    with pytest.raises(pickle.UnpicklingError):
+        safe_loads(b"cbuiltins\nbytearray\n(I5\ntR.")  # bytearray(5); any size would do
+
+
+def test_oversized_child_output_returns_none(fixture_repo):
+    assert run_batch(fixture_repo, fn_named(fixture_repo, "flood_result"), [(1,)], sys.executable) is None
+
+
+def test_interpreter_falls_back_to_virtual_env(tmp_path, monkeypatch):
+    py = tmp_path / "ve/bin/python"
+    py.parent.mkdir(parents=True)
+    py.touch(mode=0o755)
+    monkeypatch.setenv("VIRTUAL_ENV", str(tmp_path / "ve"))
+    assert pick_interpreter(tmp_path / "repo") == str(py)

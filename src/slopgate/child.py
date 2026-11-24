@@ -7,7 +7,7 @@ import pickle
 import signal
 import sys
 
-_SAFE_BUILTINS = {"complex", "bytearray"}
+_SAFE_BUILTINS = {"complex"}  # bytearray needs no global under protocol 5
 
 
 class SafeUnpickler(pickle.Unpickler):
@@ -44,7 +44,7 @@ def _call(fn, args):
 
 def _checked(outcome):
     try:
-        data = pickle.dumps(outcome)
+        data = pickle.dumps(outcome, protocol=5)
         safe_loads(data)
         return outcome
     except Exception:
@@ -62,7 +62,7 @@ def main() -> None:
         fn = getattr(fn, part)
     signal.signal(signal.SIGALRM, _alarm)
     outcomes = [_checked(_call(fn, copy.deepcopy(args))) for args in inputs]
-    out.write(pickle.dumps(outcomes))
+    out.write(pickle.dumps(outcomes, protocol=5))
     out.flush()
 
 

@@ -12,6 +12,14 @@ def test_pure_annotated_function_is_judgeable():
     assert why_not_judgeable(one("def f(a: int, b: list[str]) -> int: return a")) is None
 
 
+def test_params_locals_loops_and_safe_builtins_are_judgeable():
+    src = ("def f(a: list[int], n: int = 2) -> int:\n"
+           "    t = 0\n    for x in a:\n        t += x * n\n"
+           "    try:\n        t = max(t, 1)\n    except ValueError as e:\n        raise e\n"
+           "    return sum([y for y in sorted(a) if (z := y) > t]) + len(a)\n")
+    assert why_not_judgeable(one(src)) is None
+
+
 @pytest.mark.parametrize("src", [
     "def f(a: int | None, b: dict[str, tuple[int, ...]]): return a",
     "def f(a: Optional[int], b: Union[str, bytes], c: frozenset[float]): return a",
@@ -35,6 +43,13 @@ def test_allowed_annotations(src):
     ("def f(a: int):\n    return ().__class__", "denied: __class__"),
     ("def f(a: str):\n    return getattr(a, 'upper')()", "denied: getattr"),
     ("def f(a: int):\n    return type(a)", "denied: type"),
+    ("def f(a: str):\n    import subprocess as sp\n    return sp.run(a)", "denied: import"),
+    ("def f(a: str):\n    from os import system\n    return system(a)", "denied: import"),
+    ("@os.system\ndef f(a: int): return a", "decorated"),
+    ("def f(a: str):\n    return run(a, shell=True)", "denied: run"),
+    ("def f(a: str):\n    return builtins.open(a)", "denied: builtins"),
+    ("def f(a: int):\n    breakpoint()\n    return a", "denied: breakpoint"),
+    ("def f(a: int):\n    return helper(a)", "denied: helper"),
 ])
 def test_unjudgeable_reasons(src, reason):
     assert why_not_judgeable(one(src)).startswith(reason)

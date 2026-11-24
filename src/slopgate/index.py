@@ -1,6 +1,6 @@
 import ast
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 _FUNCS = (ast.FunctionDef, ast.AsyncFunctionDef)
@@ -26,6 +26,7 @@ class FunctionInfo:
     is_method: bool
     source: str
     body_key: str
+    decorators: list[str] = field(default_factory=list)
 
 
 def _module_name(path: str) -> str:
@@ -79,6 +80,7 @@ def index_source(path: str, text: str) -> list[FunctionInfo]:
                     params=_params(node.args), is_async=isinstance(node, ast.AsyncFunctionDef),
                     is_generator=_is_generator(node), is_method=in_class,
                     source=ast.get_source_segment(text, node) or "", body_key=_body_key(node),
+                    decorators=[ast.unparse(d) for d in node.decorator_list],
                 ))
             elif isinstance(node, ast.ClassDef):
                 visit(node.body, f"{prefix}{node.name}.", True)

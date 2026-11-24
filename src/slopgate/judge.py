@@ -5,13 +5,14 @@ from slopgate.index import FunctionInfo
 
 _SCALARS = {"int", "float", "str", "bytes", "bool"}
 _CONTAINERS = {"list", "dict", "tuple", "set", "frozenset", "Optional", "Union"}
-_DENIED = {
-    "open", "print", "input", "exec", "eval", "compile", "__import__", "globals",
-    "setattr", "delattr", "os", "sys", "subprocess", "socket", "shutil", "pathlib",
-    "Path", "requests", "httpx", "urllib", "sqlite3", "time", "datetime", "random",
-    "uuid", "secrets", "threading", "asyncio", "multiprocessing", "logging",
-    "getattr", "vars", "type", "dir", "locals", "importlib", "__builtins__",
-}
+# Fail closed: a name read in the body must be a param, a local, or one of these.
+_SAFE_BUILTINS = set("""
+abs all any bin bool bytes callable chr dict divmod enumerate filter float format frozenset
+hash hex int isinstance issubclass iter len list map max min next oct ord pow range repr
+reversed round set slice sorted str sum tuple zip ArithmeticError AssertionError Exception
+IndexError KeyError LookupError NotImplementedError OverflowError StopIteration TypeError
+ValueError ZeroDivisionError
+""".split())
 
 
 def _annotation_ok(node: ast.AST) -> bool:
@@ -40,12 +41,28 @@ def why_not_judgeable(fn: FunctionInfo) -> str | None:
             return f"unannotated: {p.name}"
         if not _annotation_ok(ast.parse(p.annotation, mode="eval").body):
             return f"annotation: {p.name}"
+    if fn.decorators:
+        return "decorated"
     tree = ast.parse(textwrap.dedent(fn.source)).body[0]
     # *args/**kwargs are not in fn.params; the prover cannot generate them.
     if tree.args.vararg or tree.args.kwarg:
         return "annotation: varargs"
-    for n in ast.walk(tree):
-        if isinstance(n, ast.Name) and n.id in _DENIED:
+    # Param annotations are checked above, so scan only the body and default values.
+    nodes = [n for r in [*tree.body, *tree.args.defaults, *tree.args.kw_defaults] if r for n in ast.walk(r)]
+    bound = {p.name for p in fn.params}
+    for n in nodes:
+        if isinstance(n, (ast.Import, ast.ImportFrom)):
+            return "denied: import"
+        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store):
+            bound.add(n.id)
+        elif isinstance(n, ast.ExceptHandler) and n.name:
+            bound.add(n.name)
+        elif isinstance(n, ast.arg):
+            bound.add(n.arg)
+        elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(n.name)
+    for n in nodes:
+        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load) and n.id not in bound | _SAFE_BUILTINS:
             return f"denied: {n.id}"
         # dunder access (e.g. ().__class__) can reach denied modules without naming them
         if isinstance(n, ast.Attribute) and n.attr.startswith("__"):

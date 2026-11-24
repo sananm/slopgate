@@ -84,6 +84,9 @@ def _prove(repo: Path, f: FunctionInfo, g: FunctionInfo, interpreter: str) -> Ve
     for fn in (f, g):
         if why := why_not_judgeable(fn):
             return Verdict(None, 0, f"{fn.qualname}: {why}")
+    # inputs cover required params only; callers may pass the defaulted ones, so equal-at-defaults proves nothing
+    if any(p.has_default for p in f.params):
+        return Verdict(None, 0, f"{f.qualname}: defaulted parameter")
     if required_arity(f) != required_arity(g):
         return Verdict(None, 0, "arity differs")
     inputs = generate_inputs(f)

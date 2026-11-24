@@ -105,3 +105,9 @@ def test_returning_the_argument_differs_from_returning_a_copy(fixture_repo):
 def test_prove_never_raises_on_a_broken_function_info(fixture_repo):
     broken = dataclasses.replace(fn_named(fixture_repo, "abs_mine"), source="")
     assert prove(fixture_repo, broken, fn_named(fixture_repo, "abs_mine"), sys.executable).equivalent is None
+
+
+def test_defaulted_parameter_gets_no_verdict(fixture_repo):
+    # callers may pass k / lo / hi; equal behavior at the defaults says nothing about those calls
+    for f, g in (("add_k", "ident_int"), ("clamp", "clamp01")):
+        assert prove(fixture_repo, fn_named(fixture_repo, f), fn_named(fixture_repo, g), sys.executable).equivalent is not True

@@ -80,3 +80,19 @@ def ident_list(xs: list[int]) -> list[int]:
 
 def copy_list(xs: list[int]) -> list[int]:
     return list(xs)
+
+
+def add_k(x: int, k: int = 0) -> int:
+    return x + k
+
+
+def ident_int(x: int) -> int:
+    return x
+
+
+def clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
+    return lo if x < lo else hi if x > hi else x
+
+
+def clamp01(x: float) -> float:
+    return min(max(x, 0.0), 1.0) if x == x else x

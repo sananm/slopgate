@@ -16,7 +16,7 @@ In the intended flow, the reason is fed back to the agent so it can reuse the ex
 
 ### Coverage on that repo
 
-Measured on the same repo before the `clamp` helper was added: 1,546 functions in 102 files, 0 judgeable. 1,110 are methods and 361 are async. The remaining 74 plain functions were all rejected: 36 for reading names outside the allowed set (11 use `global`, 5 import, 4 use `argparse`, the rest module state or other modules), 25 for annotations the prover cannot generate (7 are `*args`/`**kwargs`), 7 are decorated, 5 are unannotated, 1 is a generator.
+Measured on the same repo before the `clamp` helper was added: 1,546 functions in 102 files, 0 judgeable. 1,110 are methods and 361 are async. The remaining 75 plain functions were all rejected: 36 for reading names outside the allowed set (11 use `global`, 5 import, 4 use `argparse`, the rest module state or other modules), 25 for annotations the prover cannot generate (7 are `*args`/`**kwargs`), 7 are decorated, 5 are unannotated, 2 are generators.
 
 Without the planted helper, slopgate would have judged nothing in this repo. That is the current limitation: it only acts on plain, builtin-typed functions, and methods and async functions are the obvious next work.
 

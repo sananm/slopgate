@@ -33,7 +33,7 @@ There were no false copy or near-copy claims, and those rules were not tuned on 
 
 ## The checks
 
-Each function is reduced to a normal form before comparing: the docstring, its name and type annotations are dropped, local variables are renamed in order of first use, and names from outside the function are qualified by where they come from (so `sqrt(x)` and `log(x)`, or two different imported `helper`s, never match). Two functions with the same normal form do the same thing by construction, for methods, async functions and any argument type. Only functions of at least 40 AST nodes are compared, and stubs (`pass`, `...`, `raise NotImplementedError`, `@abstractmethod`) are exempt.
+Each function is reduced to a normal form before comparing: the docstring, its name and parameter and return annotations are dropped, local variables are renamed in order of first use, and names from outside the function are qualified by where they come from (so `sqrt(x)` and `log(x)`, or two different imported `helper`s, never match). Two functions with the same normal form are the same code up to renaming of local variables, for methods, async functions and any argument type. Only functions of at least 40 AST nodes are compared, and stubs (`pass`, `...`, `raise NotImplementedError`, `@abstractmethod`) are exempt.
 
 - **Copy (blocks).** A new or changed function whose normal form equals an existing one. The finding names the original and says to import it, move it to a shared helper, or move it into the shared base class.
 - **Near-copy (blocks).** A function equal to an existing one except for at most 3 numeric constants, at least one outside `{-1, 0, 1, 2}`, none used as an index. The finding says to add a parameter instead of copying.

@@ -107,3 +107,19 @@ def test_finding_text_matches_spec_format(repo):
         "api/views.py:41 fmt_date reimplements utils/dates.py:12 to_iso\n"
         "  (identical on 200 generated inputs). Delete fmt_date (38 lines)\n"
         "  and call to_iso.")
+
+
+@pytest.mark.parametrize("xdg", ["/x/cache", None])
+def test_model_cache_is_outside_the_temp_dir(monkeypatch, xdg):
+    import types
+    from pathlib import Path
+    from slopgate.reinvention import MODEL, default_embed
+    seen = {}
+    monkeypatch.setitem(sys.modules, "fastembed", types.SimpleNamespace(TextEmbedding=lambda *a, **k: seen.update(a=a, k=k)))
+    if xdg:
+        monkeypatch.setenv("XDG_CACHE_HOME", xdg)
+    else:
+        monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
+    default_embed()
+    want = Path(xdg) if xdg else Path.home() / ".cache"
+    assert seen == {"a": (MODEL,), "k": {"cache_dir": str(want / "slopgate")}}

@@ -1,6 +1,7 @@
 import hashlib
 import json
 import math
+import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -20,7 +21,9 @@ MODEL = "jinaai/jina-embeddings-v2-base-code"
 def default_embed() -> Embed:
     from fastembed import TextEmbedding  # lazy: importing this module must not need the model
 
-    model = TextEmbedding(MODEL)
+    # not fastembed's default ($TMPDIR): a purged temp dir means a 600 MB re-download inside the Stop hook
+    cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "slopgate"
+    model = TextEmbedding(MODEL, cache_dir=str(cache))
     return lambda texts: [list(map(float, v)) for v in model.embed(texts)]
 
 

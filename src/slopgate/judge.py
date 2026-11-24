@@ -10,6 +10,7 @@ _DENIED = {
     "setattr", "delattr", "os", "sys", "subprocess", "socket", "shutil", "pathlib",
     "Path", "requests", "httpx", "urllib", "sqlite3", "time", "datetime", "random",
     "uuid", "secrets", "threading", "asyncio", "multiprocessing", "logging",
+    "getattr", "vars", "type", "dir", "locals", "importlib", "__builtins__",
 }
 
 

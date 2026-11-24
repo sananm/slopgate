@@ -33,6 +33,8 @@ def test_allowed_annotations(src):
     ("def f(a: int):\n    return time.time() + a", "denied: time"),
     ("def f(a: int):\n    return os.path.join('x', 'y')", "denied: os"),
     ("def f(a: int):\n    return ().__class__", "denied: __class__"),
+    ("def f(a: str):\n    return getattr(a, 'upper')()", "denied: getattr"),
+    ("def f(a: int):\n    return type(a)", "denied: type"),
 ])
 def test_unjudgeable_reasons(src, reason):
     assert why_not_judgeable(one(src)).startswith(reason)

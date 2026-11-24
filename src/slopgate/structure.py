@@ -11,7 +11,7 @@ from pathlib import PurePosixPath
 from slopgate.index import _FUNCS, _module_name
 
 _FLOOR = 40
-_BUILTINS = frozenset(dir(builtins))
+_BUILTINS = frozenset(n for n in dir(builtins) if not (n.startswith("__") and n.endswith("__")))  # dunders like __name__ are per-module
 _COMPS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
 _SCOPES = (*_FUNCS, ast.Lambda, ast.ClassDef)
 
@@ -48,10 +48,12 @@ def _absolute(module: str | None, level: int, modname: str, is_pkg: bool) -> str
 
 def _own_nodes(node: ast.AST):
     """Nodes of this scope, not descending into nested defs, lambdas or classes."""
-    for child in ast.iter_child_nodes(node):
+    stack = [*ast.iter_child_nodes(node)][::-1]  # iterative, so deep expressions cannot hit the recursion limit
+    while stack:
+        child = stack.pop()
         yield child
         if not isinstance(child, _SCOPES):
-            yield from _own_nodes(child)
+            stack.extend([*ast.iter_child_nodes(child)][::-1])
 
 
 def _bound_names(node: ast.AST):
@@ -209,7 +211,7 @@ def _normalize(fn, mod: _Module, cls: ast.ClassDef | None, cls_qual: str):
                 if name in s.bound and name not in s.nonlocals:
                     if s.kind == "class":  # class-body names are attributes, so keep them, marked apart from locals
                         return f"@{name}"
-                    return names.setdefault((s, name), f"v{len(names)}")
+                    return names.setdefault((s, name), f"#v{len(names)}")  # '#' keeps locals apart from any imported or free name
             s, skip = s.parent, True
         if scope is outer and name in cls_names:  # decorators and defaults of a method see the class body
             return f"{mod.name}.{cls_qual}.{name}"
@@ -271,6 +273,23 @@ def _uses_super(fn) -> bool:
                for n in ast.walk(fn))
 
 
+def _uses_class_cell(fn) -> bool:
+    return any(isinstance(n, ast.Name) and n.id == "__class__" for n in ast.walk(fn))
+
+
+def _qualified_bases(cls: ast.ClassDef, mod: "_Module", parent: ast.ClassDef | None, parent_qual: str) -> tuple[str, ...]:
+    """Each base expression with its names qualified like free names; bases are evaluated in the parent scope."""
+    parent_names = set(_bound_names(parent)) if parent is not None else set()
+    out = []
+    for b in cls.bases:
+        b = copy.deepcopy(b)
+        for n in ast.walk(b):
+            if isinstance(n, ast.Name):
+                n.id = f"{mod.name}.{parent_qual}.{n.id}" if n.id in parent_names else mod.qualify(n.id)
+        out.append(ast.dump(b))
+    return tuple(out)
+
+
 def shapes_of(path: str, text: str) -> list[Shape]:
     try:
         tree = ast.parse(text)
@@ -279,15 +298,22 @@ def shapes_of(path: str, text: str) -> list[Shape]:
     mod = _Module(path, tree)
     out: list[Shape] = []
 
-    def visit(body: list[ast.stmt], prefix: str, cls: ast.ClassDef | None) -> None:
+    def visit(body: list[ast.stmt], prefix: str, cls: ast.ClassDef | None, fold: tuple[str, ...]) -> None:
         for node in body:
             if isinstance(node, _FUNCS):
-                norm = _normalize(node, mod, cls, prefix[:-1])
+                try:
+                    norm = _normalize(node, mod, cls, prefix[:-1])
+                    extra = ""
+                    if _uses_super(node):  # zero-arg super() resolves via the class bases
+                        extra += f"\nsuper:{fold!r}"
+                    if _uses_class_cell(node):  # __class__ is the enclosing class itself
+                        extra += f"\nclass:{mod.name}.{prefix[:-1]}"
+                    exact = _digest(norm, extra)
+                    nums = _Numbers()
+                    near = _digest(nums.visit(norm), extra)
+                except RecursionError:  # pathologically deep code: no shape, so never a claim
+                    continue
                 bases = tuple(ast.unparse(b).split(".")[-1] for b in cls.bases) if cls else ()
-                extra = f"\nsuper:{bases!r}" if _uses_super(node) else ""  # zero-arg super() resolves via the class bases
-                exact = _digest(norm, extra)
-                nums = _Numbers()
-                near = _digest(nums.visit(norm), extra)
                 out.append(Shape(
                     path=path, qualname=prefix + node.name, module=mod.name,
                     line=node.lineno, end_line=node.end_lineno or node.lineno,
@@ -297,9 +323,13 @@ def shapes_of(path: str, text: str) -> list[Shape]:
                     comparable=sum(1 for _ in ast.walk(node)) >= _FLOOR and not _is_stub(node),
                 ))
             elif isinstance(node, ast.ClassDef):
-                visit(node.body, f"{prefix}{node.name}.", node)
+                try:
+                    inner = _qualified_bases(node, mod, cls, prefix[:-1])
+                except RecursionError:
+                    continue
+                visit(node.body, f"{prefix}{node.name}.", node, inner)
 
-    visit(tree.body, "", None)
+    visit(tree.body, "", None, ())
     return out
 
 

@@ -154,3 +154,45 @@ def test_super_keys_differ_by_class_bases():
 
 def test_super_keys_match_for_identical_bases():
     assert _save("A, M") == _save("A, M", cls="D")
+
+
+def test_module_dunders_are_per_module():
+    src = "import logging\n"
+    fn = "def f(x): return logging.getLogger(__name__)"
+    assert key_in(src, fn, path="a.py") != key_in(src, fn, path="b.py")
+
+
+_SUPER = "    def save(self):\n        return super().save()\n"
+
+
+def _method_key(prelude, base, path="m.py", body=_SUPER):
+    return next(s for s in shapes_of(path, f"{prelude}class C({base}):\n{body}") if s.qualname == "C.save").exact_key
+
+
+@pytest.mark.parametrize("a,b", [
+    (("import a\n", "a.Base"), ("import b\n", "b.Base")),
+    (("from p import Base\n", "Base"), ("from q import Base\n", "Base")),
+    (("class Base: pass\n", "Base", "a.py"), ("class Base: pass\n", "Base", "b.py")),
+])
+def test_super_keys_use_qualified_bases(a, b):
+    assert _method_key(*a) != _method_key(*b)
+
+
+def test_super_keys_match_for_same_qualified_bases():
+    assert _method_key("from p import Base\n", "Base", "a.py") == _method_key("from p import Base\n", "Base", "b.py")
+
+
+def test_class_cell_depends_on_the_class():
+    body = "    def save(self):\n        return __class__\n"
+    c, d = shapes_of("m.py", "class C:\n" + body + "class D:\n" + body)
+    assert c.exact_key != d.exact_key
+
+
+def test_imported_name_never_collides_with_a_renamed_local():
+    assert key_in("import v0\n", "def f(x): return v0(x)") != key_in("", "def f(x): return x(x)")
+
+
+def test_deep_function_is_skipped_and_the_rest_of_the_file_still_indexes():
+    deep = "+".join(["a"] * 250)
+    shapes = shapes_of("m.py", f"y = {deep}\ndef deep(a):\n    return {deep}\ndef ok(x):\n    return x\n")
+    assert [s.qualname for s in shapes] == ["ok"]

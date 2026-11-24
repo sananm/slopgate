@@ -29,3 +29,8 @@ def test_state_lives_under_git_dir(tmp_repo):
 
 def test_load_snapshot_is_none_when_never_taken(tmp_repo):
     assert load_snapshot(tmp_repo) is None
+
+
+def test_load_snapshot_is_none_when_file_is_corrupt(tmp_repo):
+    (state_dir(tmp_repo) / "snapshot.json").write_text('{"task_id": "x", "fi')
+    assert load_snapshot(tmp_repo) is None

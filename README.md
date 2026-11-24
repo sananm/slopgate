@@ -21,7 +21,7 @@ In total, `scan` reported 4 copy groups, 2 near-copy groups (the second is a pai
 
 The same scan on two other private repos (55 Python files each) found 2 more copy groups, a model-factory function copied between two packages and an audio-slicing helper copied under a new name, plus 1 wrapper note. A third model factory that reads a different setting was correctly kept apart.
 
-Hand-check across all three repos (14 findings):
+Hand-check across all three repos (14 findings, a small sample):
 
 | Kind | Reported | Genuine | Real but intentional | Wrong |
 |---|---|---|---|---|
@@ -29,7 +29,7 @@ Hand-check across all three repos (14 findings):
 | near-copy | 2 groups | 1 | 1 (test fixtures, advisory only) | 0 |
 | wrapper note | 6 | 5 | 1 (a FastAPI dependency function, used once in `Depends(...)`) | 0 |
 
-There were no false claims. Methods of classes that have a base class are not given wrapper notes, because a framework may call them where a name search cannot see it (`nn.Module.forward`, for example). That skips 4 framework methods in these repos, but it also drops one genuine forwarder in a repository subclass. Wrapper notes are advisory and never block.
+There were no false copy or near-copy claims, and those rules were not tuned on these repos. The wrapper rule was: a first run gave 11 wrapper notes, 3 with wording that was wrong and 4 on framework methods, and the note text and the subclass rule below were changed after seeing them. So the wrapper figure is in-sample. Methods of classes that have a base class are not given wrapper notes, because a framework may call them where a name search cannot see it (`nn.Module.forward`, for example). That skips 4 framework methods in these repos, but it also drops one genuine forwarder in a repository subclass. Wrapper notes are advisory and never block.
 
 ## The checks
 

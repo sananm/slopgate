@@ -31,17 +31,17 @@ slopgate install <repo>
 
 ## What is judged
 
-A function is only compared if it is simple enough to run safely on generated inputs. Everything else is skipped silently.
+A function is only compared if it is simple enough to run safely on generated inputs. Everything else is skipped; the status line reports how many new functions were judgeable.
 
 Judged: module-level, synchronous, non-generator, undecorated functions where every parameter is annotated with a builtin type (`int`, `float`, `str`, `bytes`, `bool`, `list`, `dict`, `tuple`, `set`, `frozenset`, `Optional`, `Union`, `None`, and `X | Y` of these), defaults are constants, there is no `*args`/`**kwargs`, no `global`/`nonlocal`, no nested functions, lambdas or classes, no imports, no dunder attribute access, and the body reads only its parameters, its own locals and a short list of builtins (so no I/O, no module state, no calls to other repo functions).
 
-Not judged: methods, async functions, generators, decorated functions, and anything that fails the list above. Only functions added or changed in the turn are checked, against up to 5 judgeable existing functions with the same required arity, ranked by embedding similarity.
+Not judged: methods, async functions, generators, decorated functions, and anything that fails the list above. Only new functions (added in the turn) are checked, against up to 5 judgeable existing functions with the same required arity, ranked by embedding similarity.
 
-Honest limit: "identical" means identical on the generated inputs (200 in the example), not a formal proof.
+Honest limits: "identical" means identical on the generated inputs (200 in the example), not a formal proof. Generated ints stay within ±10,000 and strings, bytes and collections hold at most 50 items. Arguments are never generated aliased to each other (`a is b`). A new function with a defaulted parameter gets no verdict, because callers may pass values the inputs never cover.
 
 ## Sandbox
 
-Both functions run in a child process with network access denied and file writes restricted to a temporary directory (`sandbox-exec` on macOS, `bwrap` on Linux), with a time limit per batch and a cap on output size. If neither is available, slopgate still runs, unsandboxed, and says so in its status line. The judgeability rules are a pre-filter, not a security boundary; the OS sandbox is what contains execution.
+Both functions run in a child process with network access denied and file writes restricted to a temporary directory (`sandbox-exec` on macOS; on Linux, `bwrap` if it is installed), with a time limit per batch and a cap on output size. On Linux the child's address space is capped at 2 GiB; macOS does not enforce that limit, so there is no memory cap there. If no sandbox is available, slopgate still runs, unsandboxed, and its status line ends with `(running unsandboxed)`. The judgeability rules are a pre-filter, not a security boundary; the OS sandbox is what contains execution.
 
 ## Limits of this milestone
 

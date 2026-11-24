@@ -7,6 +7,7 @@ import pickle
 import signal
 import sys
 
+_MAX_MEMORY = 2 << 30
 _SAFE_BUILTINS = {"complex"}  # bytearray needs no global under protocol 5
 
 
@@ -56,6 +57,11 @@ def main() -> None:
     null = os.open(os.devnull, os.O_WRONLY)
     os.dup2(null, 1)  # keep the function's prints out of the result pipe
     repo_root, module, qualname, inputs = pickle.load(sys.stdin.buffer)
+    if sys.platform.startswith("linux"):  # macOS does not enforce RLIMIT_AS
+        import resource
+        hard = resource.getrlimit(resource.RLIMIT_AS)[1]
+        cap = _MAX_MEMORY if hard == resource.RLIM_INFINITY else min(_MAX_MEMORY, hard)
+        resource.setrlimit(resource.RLIMIT_AS, (cap, hard))  # before any repo code is imported
     sys.path[:1] = [repo_root, os.path.join(repo_root, "src")]  # drop this script's own dir
     fn = importlib.import_module(module)
     for part in qualname.split("."):

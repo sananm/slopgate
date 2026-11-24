@@ -111,3 +111,25 @@ def test_defaulted_parameter_gets_no_verdict(fixture_repo):
     # callers may pass k / lo / hi; equal behavior at the defaults says nothing about those calls
     for f, g in (("add_k", "ident_int"), ("clamp", "clamp01")):
         assert prove(fixture_repo, fn_named(fixture_repo, f), fn_named(fixture_repo, g), sys.executable).equivalent is not True
+
+
+def _walk(v):
+    yield v
+    if isinstance(v, dict):
+        v = [*v.keys(), *v.values()]
+    if isinstance(v, (list, tuple, set, frozenset)):
+        for x in v:
+            yield from _walk(x)
+
+
+def test_generated_inputs_are_bounded():
+    fn = index_source("m.py", "def f(a: int, b: str, c: list[bytes], d: dict[str, tuple[int, ...]], e: set[int] | None) -> int:\n    return a\n")[0]
+    for args in generate_inputs(fn):
+        vals = [v for a in args for v in _walk(a)]
+        assert all(len(v) <= 50 for v in vals if isinstance(v, (str, bytes, list, tuple, dict, set, frozenset)))
+        assert all(abs(v) <= 10**4 for v in vals if type(v) is int)
+
+
+def test_repeat_inputs_stay_small():
+    rep = index_source("m.py", "def rep(s: str, n: int) -> str:\n    return s * n\n")[0]
+    assert max(len(s) * abs(n) for s, n in generate_inputs(rep)) <= 10**6

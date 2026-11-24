@@ -1,6 +1,7 @@
 import builtins
 import pickle
 import tempfile
+import types
 import typing
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +22,13 @@ _MIN_RETURNS = 50
 _RERUN = 20
 # Only the names judge's annotation allowlist accepts; never repo code.
 _NAMESPACE = {"__builtins__": {}} | {n: getattr(builtins, n, None) or getattr(typing, n) for n in _SCALARS | _CONTAINERS}
+_MAX_INT = 10**4
+_MAX_SIZE = 50
+_LEAF = {
+    int: st.integers(-_MAX_INT, _MAX_INT), bool: st.booleans(), float: st.floats(),
+    str: st.text(max_size=_MAX_SIZE), bytes: st.binary(max_size=_MAX_SIZE), None: st.none(), type(None): st.none(),
+}
+_ANY = st.one_of(*_LEAF.values())  # elements of a bare list/dict/tuple/set; all hashable
 _ARITY = {"return": 3, "raise": 3, "timeout": 1, "error": 2}
 
 
@@ -31,14 +39,33 @@ class Verdict:
     reason: str
 
 
+def _strategy(tp: object) -> st.SearchStrategy:
+    """Bounded strategy for an annotation judge allows: ints within +-10**4, every sized value at most 50 long."""
+    if tp in _LEAF:
+        return _LEAF[tp]
+    origin, args = typing.get_origin(tp) or tp, typing.get_args(tp)
+    if origin in (typing.Union, types.UnionType):
+        return st.one_of(*map(_strategy, args))
+    if origin is dict:
+        k, v = map(_strategy, args) if args else (_ANY, _ANY)
+        return st.dictionaries(k, v, max_size=_MAX_SIZE)
+    if origin is tuple and tp is not tuple and args[-1:] != (Ellipsis,):  # fixed shape, incl. tuple[()]
+        return st.tuples(*map(_strategy, args))
+    if origin in (list, tuple, set, frozenset):
+        elem = _strategy(args[0]) if args else _ANY
+        sized = st.lists(elem, max_size=_MAX_SIZE) if origin in (list, tuple) else st.sets(elem, max_size=_MAX_SIZE)
+        return sized.map(origin)
+    raise ValueError(f"no strategy for {tp!r}")
+
+
 def generate_inputs(fn: FunctionInfo, n: int = _N) -> list[tuple]:
     if why := why_not_judgeable(fn):
         raise ValueError(why)
-    types = [eval(p.annotation, dict(_NAMESPACE)) for p in fn.params if not p.has_default]
+    hints = [eval(p.annotation, dict(_NAMESPACE)) for p in fn.params if not p.has_default]
     out: list[tuple] = []
 
     @settings(max_examples=n, database=None, derandomize=True, deadline=None, suppress_health_check=list(HealthCheck))
-    @given(st.tuples(*map(st.from_type, types)))
+    @given(st.tuples(*map(_strategy, hints)))
     def collect(args: tuple) -> None:
         out.append(args)
 

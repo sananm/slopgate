@@ -132,7 +132,7 @@ def _check(t0: float) -> dict:
                f"{len(result.findings)} findings, {result.skipped} skipped") + (" (running unsandboxed)" if sandbox_kind() == "none" else "")
     if block:
         return {"decision": "block", "reason": text, "systemMessage": summary}
-    return {"systemMessage": "\n\n".join([summary, *notes])}
+    return {"systemMessage": "\n\n".join([summary, *found, *notes])}
 
 
 def check() -> int:

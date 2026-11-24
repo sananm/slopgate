@@ -233,6 +233,16 @@ def test_copy_skips_the_prover(fixture_git_repo, capsys, monkeypatch):
     assert pasted_name() not in seen
 
 
+def test_let_through_copy_is_shown_in_summary(fixture_git_repo, capsys):
+    run_hook(["start"], fixture_git_repo)
+    paste_copy(fixture_git_repo)
+    run_hook(["check"], fixture_git_repo)
+    run_hook(["check"], fixture_git_repo)
+    first, second = (json.loads(line) for line in capsys.readouterr().out.splitlines())
+    assert first["decision"] == "block" and "decision" not in second
+    assert f"b.py:4 {pasted_name()} is a copy of" in second["systemMessage"]
+
+
 def test_wrapper_note_never_blocks_alone(fixture_git_repo, capsys):
     run_hook(["start"], fixture_git_repo)
     add_forwarding_wrapper(fixture_git_repo)

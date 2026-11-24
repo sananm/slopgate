@@ -26,7 +26,7 @@ def _id(s: Shape) -> tuple[str, str]:
 
 def _diff(a: Shape, b: Shape) -> tuple[tuple, tuple] | None:
     """Positionally differing constants (a's, b's) when the pair is a near clone, else None."""
-    pairs = [(x, y) for x, y in zip(a.consts, b.consts) if x[0] != y[0]]
+    pairs = [(x, y) for x, y in zip(a.consts, b.consts) if (type(x[0]), x[0]) != (type(y[0]), y[0])]  # 2 != 2.0
     if not pairs or len(pairs) > _MAX_DIFF or any(x[1] or y[1] for x, y in pairs):
         return None
     if all(x[0] in _TRIVIAL and y[0] in _TRIVIAL for x, y in pairs):
@@ -42,10 +42,11 @@ def _by(shapes, attr) -> dict[str, list[Shape]]:
     return out
 
 
-def _base(new: Shape, orig: Shape) -> str | None:
+def _base(new: Shape, orig: Shape, classes: set[str]) -> str | None:
+    """A shared base defined in the repo (so never object, ABC, BaseModel or nn.Module)."""
     if new.cls is None or orig.cls is None or new.qualname.split(".")[-1] != orig.qualname.split(".")[-1]:
         return None
-    return next((b for b in new.bases if b in orig.bases), None)
+    return next((b for b in new.bases if b in orig.bases and b in classes), None)
 
 
 def find_clones(candidates: list[Shape], pool: list[Shape], before: list[Shape]) -> list[Clone]:
@@ -54,6 +55,8 @@ def find_clones(candidates: list[Shape], pool: list[Shape], before: list[Shape])
     def ordered(shapes, attr):  # per bucket: shapes present in before first, then the rest, each by (path, qualname)
         return {k: sorted(g, key=lambda o: (_id(o) not in old, _id(o))) for k, g in _by(shapes, attr).items()}
     exact, nears = ordered(pool, "exact_key"), ordered(pool, "near_key")
+    # shortcut: a repo class is known only by its methods, so a method-less base gets the helper wording
+    classes = {s.cls for s in pool if s.cls}
     out = []
     for c in candidates:
         if not c.comparable:
@@ -74,7 +77,7 @@ def find_clones(candidates: list[Shape], pool: list[Shape], before: list[Shape])
         if prev and prev_o and (prev.exact_key == prev_o.exact_key if kind == "copy" else
                                 prev.exact_key != prev_o.exact_key and prev.near_key == prev_o.near_key and _diff(prev, prev_o)):
             continue  # relation already existed
-        out.append(Clone(kind, c, orig, diff, _base(c, orig),
+        out.append(Clone(kind, c, orig, diff, _base(c, orig, classes),
                          not (is_test_path(c.path) or is_test_path(orig.path))))
     return out
 
@@ -91,6 +94,10 @@ def clone_groups(shapes: list[Shape]) -> list[list[Shape]]:
 
 
 def format_clone(c: Clone) -> str:
+    return ("" if c.blocking else "note: ") + _clone_text(c)
+
+
+def _clone_text(c: Clone) -> str:
     n, o = c.new, c.original
     if c.kind == "near":
         a, b = (", ".join(map(repr, v)) for v in c.diff)

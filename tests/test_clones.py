@@ -71,9 +71,33 @@ def test_format_near_matches_spec():
 def test_sibling_methods_suggest_shared_base():
     new = s("b.py", "B.run", K1, cls="B", bases=("Executor",))
     old = s("a.py", "A.run", K1, cls="A", bases=("Base", "Executor"))
-    c, = find_clones([new], pool=[old, new], before=[old])
+    executor = s("base.py", "Executor.run", "k2", cls="Executor")
+    c, = find_clones([new], pool=[old, new, executor], before=[old, executor])
     assert c.base == "Executor"
     assert "  Move it into the shared base class Executor." in format_clone(c)
+
+
+@pytest.mark.parametrize("base", ["ABC", "object", "BaseModel", "Generic[T]", "Module"])
+def test_third_party_or_stdlib_base_suggests_shared_helper(base):
+    new = s("b.py", "B.run", K1, cls="B", bases=(base,))
+    old = s("a.py", "A.run", K1, cls="A", bases=(base,))
+    c, = find_clones([new], pool=[old, new], before=[old])
+    assert c.base is None and format_clone(c).endswith("  Move it to a shared helper and call that from both.")
+
+
+def test_int_and_float_constants_differ():
+    body = "".join(f"    x{j} = a + b * {j + 3}\n" for j in range(10))
+    src = "def f(n, a, b):\n" + body + "    return n // {} + {}\n"
+    shapes = index_shapes({"a.py": src.format("2", "0.95"), "b.py": src.format("2.0", "0.90")})
+    old, new = shapes
+    assert old.comparable and old.near_key == new.near_key
+    c, = find_clones([new], pool=shapes, before=[old])
+    assert c.diff == ((2.0, 0.9), (2, 0.95)) and type(c.diff[0][0]) is float
+
+
+def test_advisory_clone_text_is_a_note():
+    c, = find_clones([s("tests/t.py", "f", K1)], pool=[s("src/a.py", "f", K1), s("tests/t.py", "f", K1)], before=[s("src/a.py", "f", K1)])
+    assert format_clone(c) == "note: tests/t.py:1 f is a copy of\n  src/a.py:1 f.\n  Delete it and import the original."
 
 
 def test_method_original_suggests_shared_helper():

@@ -24,6 +24,10 @@ def test_comprehension_uses_its_own_target():
     assert why_not_judgeable(one("def f(a: list[int]): return [x * 2 for x in a]")) is None
 
 
+def test_comprehension_tuple_unpacking_is_judgeable():
+    assert why_not_judgeable(one("def f(a: list[tuple[int, int]]): return [x + y for x, y in a]")) is None
+
+
 @pytest.mark.parametrize("src", [
     "def f(a: int | None, b: dict[str, tuple[int, ...]]): return a",
     "def f(a: Optional[int], b: Union[str, bytes], c: frozenset[float]): return a",
@@ -60,6 +64,8 @@ def test_allowed_annotations(src):
     ("def f(a: str):\n    global open\n    if False:\n        open = 1\n    return open(a)", "denied: global"),
     ("def f(a: str):\n    [open for open in []]\n    return open(a)", "denied: open"),
     ("def f(a: str):\n    return [x for x in open(a)]", "denied: open"),
+    ("def f(a: str): return [0 for x in [1] if open(a) for open[0] in []]", "denied: target"),
+    ("def f(a: str): return [0 for x in [1] if eval(a) for eval.y in []]", "denied: target"),
 ])
 def test_unjudgeable_reasons(src, reason):
     assert why_not_judgeable(one(src)).startswith(reason)

@@ -63,6 +63,9 @@ def why_not_judgeable(fn: FunctionInfo) -> str | None:
         if isinstance(n, ast.Attribute) and n.attr.startswith("__"):
             return f"denied: {n.attr}"
     comps = [n for n in nodes if isinstance(n, _COMPS)]
+    pure = (ast.Name, ast.Tuple, ast.List, ast.Starred, ast.expr_context)
+    if any(not isinstance(t, pure) for c in comps for g in c.generators for t in ast.walk(g.target)):
+        return "denied: target"
     comp_targets = {id(t) for c in comps for g in c.generators for t in ast.walk(g.target)}
     # Comprehension targets are scoped to the comprehension; walrus targets still bind here.
     bound = {p.name for p in fn.params} | {
@@ -74,7 +77,7 @@ def why_not_judgeable(fn: FunctionInfo) -> str | None:
         if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load) and n.id not in scope:
             return n.id
         if isinstance(n, _COMPS):
-            inner = scope | {t.id for g in n.generators for t in ast.walk(g.target) if isinstance(t, ast.Name)}
+            inner = scope | {t.id for g in n.generators for t in ast.walk(g.target) if isinstance(t, ast.Name) and isinstance(t.ctx, ast.Store)}
             # The first iterable is evaluated in the enclosing scope.
             kids = [(n.generators[0].iter, scope)] + [(c, inner) for c in ast.iter_child_nodes(n) if c is not n.generators[0].iter]
         else:

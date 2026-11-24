@@ -15,6 +15,9 @@ ValueError ZeroDivisionError
 """.split())
 
 
+_COMPS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+
+
 def _annotation_ok(node: ast.AST) -> bool:
     if isinstance(node, ast.Name):
         return node.id in _SCALARS | _CONTAINERS
@@ -49,22 +52,35 @@ def why_not_judgeable(fn: FunctionInfo) -> str | None:
         return "annotation: varargs"
     # Param annotations are checked above, so scan only the body and default values.
     nodes = [n for r in [*tree.body, *tree.args.defaults, *tree.args.kw_defaults] if r for n in ast.walk(r)]
-    bound = {p.name for p in fn.params}
     for n in nodes:
+        if isinstance(n, (ast.Global, ast.Nonlocal)):
+            return "denied: global"
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            return "nested scope"
         if isinstance(n, (ast.Import, ast.ImportFrom)):
             return "denied: import"
-        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store):
-            bound.add(n.id)
-        elif isinstance(n, ast.ExceptHandler) and n.name:
-            bound.add(n.name)
-        elif isinstance(n, ast.arg):
-            bound.add(n.arg)
-        elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            bound.add(n.name)
-    for n in nodes:
-        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load) and n.id not in bound | _SAFE_BUILTINS:
-            return f"denied: {n.id}"
         # dunder access (e.g. ().__class__) can reach denied modules without naming them
         if isinstance(n, ast.Attribute) and n.attr.startswith("__"):
             return f"denied: {n.attr}"
-    return None
+    comps = [n for n in nodes if isinstance(n, _COMPS)]
+    comp_targets = {id(t) for c in comps for g in c.generators for t in ast.walk(g.target)}
+    # Comprehension targets are scoped to the comprehension; walrus targets still bind here.
+    bound = {p.name for p in fn.params} | {
+        n.id for n in nodes if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store) and id(n) not in comp_targets
+    } | {n.name for n in nodes if isinstance(n, ast.ExceptHandler) and n.name}
+    allowed = bound | _SAFE_BUILTINS
+
+    def bad(n: ast.AST, scope: set[str]) -> str | None:
+        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load) and n.id not in scope:
+            return n.id
+        if isinstance(n, _COMPS):
+            inner = scope | {t.id for g in n.generators for t in ast.walk(g.target) if isinstance(t, ast.Name)}
+            # The first iterable is evaluated in the enclosing scope.
+            kids = [(n.generators[0].iter, scope)] + [(c, inner) for c in ast.iter_child_nodes(n) if c is not n.generators[0].iter]
+        else:
+            kids = [(c, scope) for c in ast.iter_child_nodes(n)]
+        return next((r for c, sc in kids if (r := bad(c, sc))), None)
+
+    roots = [r for r in [*tree.body, *tree.args.defaults, *tree.args.kw_defaults] if r]
+    name = next((r for root in roots if (r := bad(root, allowed))), None)
+    return f"denied: {name}" if name else None

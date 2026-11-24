@@ -20,6 +20,10 @@ def test_params_locals_loops_and_safe_builtins_are_judgeable():
     assert why_not_judgeable(one(src)) is None
 
 
+def test_comprehension_uses_its_own_target():
+    assert why_not_judgeable(one("def f(a: list[int]): return [x * 2 for x in a]")) is None
+
+
 @pytest.mark.parametrize("src", [
     "def f(a: int | None, b: dict[str, tuple[int, ...]]): return a",
     "def f(a: Optional[int], b: Union[str, bytes], c: frozenset[float]): return a",
@@ -50,6 +54,12 @@ def test_allowed_annotations(src):
     ("def f(a: str):\n    return builtins.open(a)", "denied: builtins"),
     ("def f(a: int):\n    breakpoint()\n    return a", "denied: breakpoint"),
     ("def f(a: int):\n    return helper(a)", "denied: helper"),
+    ("def f(a: str):\n    def g():\n        open = 1\n    return open(a).read()", "nested scope"),
+    ("def f(a: str):\n    g = lambda open: 0\n    return open(a)", "nested scope"),
+    ("def f(a: str):\n    class C:\n        open = 1\n    return open(a)", "nested scope"),
+    ("def f(a: str):\n    global open\n    if False:\n        open = 1\n    return open(a)", "denied: global"),
+    ("def f(a: str):\n    [open for open in []]\n    return open(a)", "denied: open"),
+    ("def f(a: str):\n    return [x for x in open(a)]", "denied: open"),
 ])
 def test_unjudgeable_reasons(src, reason):
     assert why_not_judgeable(one(src)).startswith(reason)

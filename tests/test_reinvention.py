@@ -149,3 +149,23 @@ def test_malformed_function_is_only_unjudgeable(repo):
     ch.existing.append(broken)
     r = find_reinventions(repo, ch, fake_embed, sys.executable)
     assert (r.new_count, r.judgeable_count, len(r.findings)) == (2, 1, 1)
+
+
+def test_embed_bounds_batch_and_text_length(monkeypatch):
+    import types
+    from slopgate.reinvention import EMBED_BATCH, EMBED_CHARS, default_embed
+    calls = []
+
+    class Fake:
+        def __init__(self, *a, **k):
+            pass
+
+        def embed(self, docs, batch_size=256):
+            calls.append((list(docs), batch_size))
+            return [[0.0] for _ in calls[-1][0]]
+
+    monkeypatch.setitem(sys.modules, "fastembed", types.SimpleNamespace(TextEmbedding=Fake))
+    default_embed()(["x" * 100_000, "short"])
+    (docs, batch), = calls
+    assert batch == EMBED_BATCH <= 32
+    assert docs == ["x" * EMBED_CHARS, "short"]

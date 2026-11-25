@@ -16,6 +16,10 @@ from slopgate.snapshot import state_dir
 Embed = Callable[[list[str]], list[list[float]]]
 
 MODEL = "jinaai/jina-embeddings-v2-base-code"
+# The model pads each batch to its longest text (up to 8192 tokens) and attention memory
+# grows with the square of that length: 256 texts with one long function took ~165 GB.
+EMBED_BATCH = 16
+EMBED_CHARS = 2000
 
 
 def default_embed() -> Embed:
@@ -24,7 +28,7 @@ def default_embed() -> Embed:
     # not fastembed's default ($TMPDIR): a purged temp dir means a 600 MB re-download inside the Stop hook
     cache = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "slopgate"
     model = TextEmbedding(MODEL, cache_dir=str(cache))
-    return lambda texts: [list(map(float, v)) for v in model.embed(texts)]
+    return lambda texts: [list(map(float, v)) for v in model.embed([s[:EMBED_CHARS] for s in texts], batch_size=EMBED_BATCH)]
 
 
 @dataclass(frozen=True)

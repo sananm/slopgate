@@ -495,7 +495,7 @@ git add -A && git commit -m "feat: structural findings in the hook and slopgate 
 - [ ] **Step 1: Clone three repos into a scratch directory, never touching the originals**
 
 ```bash
-for r in predictive-scaling "Multimodal RAG" "Dev Productivity Agent"; do git clone -q --no-hardlinks "$HOME/Documents/Projects/$r" "<scratch>/eval/$r"; done
+for r in predictive-scaling <repo-2> <repo-3>; do git clone -q --no-hardlinks "<projects>/$r" "<scratch>/eval/$r"; done
 git -C "<scratch>/eval/predictive-scaling" checkout -q 9baf9c4
 ```
 

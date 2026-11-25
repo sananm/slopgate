@@ -285,8 +285,7 @@ findings before `tests`. It always exits 0 and writes nothing.
 ## 7. Evaluation
 
 1. **Run `scan` on throwaway copies** of three of Sanan's repos:
-   `predictive-scaling`, `Multimodal RAG` and `Dev Productivity Agent`, all under
-   `~/Documents/Projects/`. Make each copy with `git clone` into a scratch
+   `predictive-scaling` and two other private repos. Make each copy with `git clone` into a scratch
    directory; the originals are never touched. Hand-check every finding.
    **Target: zero false clone claims.** **Recall check:** on
    `predictive-scaling` at commit `9baf9c4`, `scan` must reproduce §1's table

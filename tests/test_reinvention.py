@@ -1,4 +1,5 @@
 import hashlib
+import json
 import math
 import shutil
 import sys
@@ -9,7 +10,7 @@ import pytest
 from slopgate.changes import Changes
 from slopgate.index import index_source
 from slopgate.judge import why_not_judgeable
-from slopgate.reinvention import Finding, find_reinventions, format_finding
+from slopgate.reinvention import Finding, cached_embeddings, find_reinventions, format_finding
 from test_sandbox import fixture_repo, fn_named  # noqa: F401
 
 
@@ -169,3 +170,26 @@ def test_embed_bounds_batch_and_text_length(monkeypatch):
     (docs, batch), = calls
     assert batch == EMBED_BATCH <= 32
     assert docs == ["x" * EMBED_CHARS, "short"]
+
+
+def test_cap_limits_optional_but_never_required(tmp_repo):
+    calls = []
+    fake = lambda texts: calls.append(list(texts)) or [[1.0, 0.0] for _ in texts]
+    vecs, left = cached_embeddings(tmp_repo, ["r1", "r2"], ["o1", "o2", "o3"], fake, cap=1)
+    assert set(vecs) == {"r1", "r2", "o1"} and left == 2
+    vecs, left = cached_embeddings(tmp_repo, ["r1"], ["o1", "o2", "o3"], fake, cap=None)
+    assert set(vecs) == {"r1", "o1", "o2", "o3"} and left == 0
+    assert sum(len(c) for c in calls) == 5  # cached ones are never re-embedded
+
+
+def test_cache_entries_of_the_wrong_length_are_treated_as_missing(tmp_repo):
+    from slopgate.snapshot import state_dir
+
+    key = lambda s: hashlib.sha256(s.encode()).hexdigest()  # noqa: E731
+    (state_dir(tmp_repo) / "embeddings.json").write_text(json.dumps(
+        {key("a"): [1.0, 0.0], key("b"): [0.0, 1.0], key("c"): [1.0, 2.0, 3.0], key("d"): "x"}))
+    calls = []
+    fake = lambda texts: calls.append(list(texts)) or [[0.5, 0.5] for _ in texts]
+    vecs, left = cached_embeddings(tmp_repo, ["a", "b", "c", "d"], [], fake, cap=0)
+    assert sorted(calls[0]) == ["c", "d"] and left == 0
+    assert all(len(v) == 2 for v in vecs.values())

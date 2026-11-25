@@ -3,6 +3,7 @@ import json
 import math
 import os
 import time
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -58,25 +59,39 @@ def format_finding(f: Finding) -> str:
 def _load_cache(path: Path) -> dict[str, list[float]]:
     try:
         data = json.loads(path.read_text())
-        return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, list)
+        good = {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, list)
                 and all(isinstance(x, (int, float)) for x in v)}
     except (OSError, ValueError, AttributeError):  # untrusted on disk: ignore and rebuild
         return {}
+    if not good:
+        return {}
+    dim = Counter(len(v) for v in good.values()).most_common(1)[0][0]  # a model change leaves mixed sizes
+    return {k: v for k, v in good.items() if len(v) == dim}
 
 
-def _embeddings(repo: Path, sources: list[str], embed: Embed) -> dict[str, list[float]]:
+def cached_embeddings(repo: Path, required: list[str], optional: list[str], embed: Embed,
+                      cap: int | None) -> tuple[dict[str, list[float]], int]:
+    """Embed all uncached `required` plus at most `cap` uncached `optional`; return vectors and the optional left out."""
     path = state_dir(repo) / "embeddings.json"
     cache = _load_cache(path)
     key = lambda s: hashlib.sha256(s.encode()).hexdigest()  # noqa: E731
-    missing = list({key(s): s for s in sources if key(s) not in cache}.values())
-    if missing:
-        for s, v in zip(missing, embed(missing)):
+    need = list({key(s): s for s in required if key(s) not in cache}.values())
+    req = {key(r) for r in required}
+    opt = list({key(s): s for s in optional if key(s) not in cache and key(s) not in req}.values())
+    take = opt if cap is None else opt[:cap]
+    todo = need + take
+    if todo:
+        for s, v in zip(todo, embed(todo)):
             cache[key(s)] = list(v)
         try:
             path.write_text(json.dumps(cache))
         except OSError:
             pass
-    return {s: cache[key(s)] for s in sources}
+    return {s: cache[key(s)] for s in required + optional if key(s) in cache}, len(opt) - len(take)
+
+
+def _embeddings(repo: Path, sources: list[str], embed: Embed) -> dict[str, list[float]]:
+    return cached_embeddings(repo, sources, [], embed, 0)[0]
 
 
 def _cosine(a: list[float], b: list[float]) -> float:

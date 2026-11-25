@@ -6,7 +6,8 @@ import sys
 
 import pytest
 
-from conftest import git_commit_all
+from conftest import (WEIGHTED, add_forwarding_wrapper, add_new_import, git_commit_all, paste_copy, pasted_name,
+                      record_new_names, rename_local_in_one_copy)
 from slopgate.cli import main
 from test_reinvention import fake_embed
 from test_snapshot import add_worktree
@@ -22,6 +23,8 @@ def no_model(monkeypatch):
 def fixture_git_repo(fixture_repo, tmp_path):
     dst = tmp_path / "repo"
     shutil.copytree(fixture_repo, dst)
+    (dst / "a.py").write_text(WEIGHTED)
+    (dst / "b.py").write_text("B = 1\n")
     subprocess.run(["git", "init", "-b", "main"], cwd=dst, check=True, capture_output=True)
     git_commit_all(dst)
     return dst
@@ -155,7 +158,8 @@ def test_unsandboxed_is_named_in_summary(fixture_git_repo, capsys, monkeypatch):
 def test_stats_line_written_per_check(fixture_git_repo):
     run_hook(["start"], fixture_git_repo)
     run_hook(["check"], fixture_git_repo)
-    assert set(last_stats(fixture_git_repo)) == {"task_id", "round", "new", "judgeable", "findings", "resolved", "skipped", "seconds"}
+    assert set(last_stats(fixture_git_repo)) == {"task_id", "round", "new", "judgeable", "findings", "resolved", "skipped", "seconds",
+                                                 "copies", "near", "wrapper_notes", "new_deps"}
 
 
 def test_install_merges_without_duplicates(tmp_path):
@@ -199,4 +203,145 @@ def test_model_is_not_loaded_when_nothing_new_is_judgeable(fixture_git_repo, cap
     (fixture_git_repo / "newmod.py").write_text("def load(p: str) -> str:\n    return open(p).read()\n")
     run_hook(["check"], fixture_git_repo)
     msg = json.loads(capsys.readouterr().out)["systemMessage"]
-    assert msg.startswith("slopgate: 1 new functions, 0 judgeable") and "boom" not in msg
+    assert msg.startswith("slopgate: 0 copies, 0 near-copies, 0 wrapper notes, 0 new dependencies, 1 new functions, 0 judgeable") and "boom" not in msg
+
+
+def test_pasted_copy_blocks_with_copy_finding(fixture_git_repo, capsys):
+    run_hook(["start"], fixture_git_repo)
+    paste_copy(fixture_git_repo)
+    run_hook(["check"], fixture_git_repo)
+    out = json.loads(capsys.readouterr().out)
+    assert out["decision"] == "block" and "is a copy of" in out["reason"] and "1 copies" in out["systemMessage"]
+    assert out["systemMessage"].startswith("slopgate: 1 copies, 0 near-copies, 0 wrapper notes, 0 new dependencies, 1 new functions")
+
+
+def test_rename_local_in_one_of_existing_copies_does_not_block(fixture_git_repo_with_two_copies, capsys):
+    run_hook(["start"], fixture_git_repo_with_two_copies)
+    rename_local_in_one_copy(fixture_git_repo_with_two_copies)
+    run_hook(["check"], fixture_git_repo_with_two_copies)
+    assert "decision" not in json.loads(capsys.readouterr().out)
+    assert last_stats(fixture_git_repo_with_two_copies)["copies"] == 0
+
+
+def test_copy_skips_the_prover(fixture_git_repo, capsys, monkeypatch):
+    seen, calls = [], []
+    fake = record_new_names(seen)
+    monkeypatch.setattr("slopgate.cli.find_reinventions", lambda *a, **k: calls.append(1) or fake(*a, **k))
+    run_hook(["start"], fixture_git_repo)
+    paste_copy(fixture_git_repo)
+    run_hook(["check"], fixture_git_repo)
+    assert json.loads(capsys.readouterr().out)["decision"] == "block"
+    assert calls and pasted_name() not in seen
+
+
+def test_let_through_copy_is_shown_in_summary(fixture_git_repo, capsys):
+    run_hook(["start"], fixture_git_repo)
+    paste_copy(fixture_git_repo)
+    run_hook(["check"], fixture_git_repo)
+    run_hook(["check"], fixture_git_repo)
+    first, second = (json.loads(line) for line in capsys.readouterr().out.splitlines())
+    assert first["decision"] == "block" and "decision" not in second
+    assert f"b.py:4 {pasted_name()} is a copy of" in second["systemMessage"]
+
+
+def test_wrapper_note_never_blocks_alone(fixture_git_repo, capsys):
+    run_hook(["start"], fixture_git_repo)
+    add_forwarding_wrapper(fixture_git_repo)
+    run_hook(["check"], fixture_git_repo)
+    out = json.loads(capsys.readouterr().out)
+    assert "decision" not in out and "1 wrapper notes" in out["systemMessage"]
+
+
+def test_notes_follow_blocking_findings(fixture_git_repo, capsys):
+    run_hook(["start"], fixture_git_repo)
+    add_forwarding_wrapper(fixture_git_repo)
+    add_reinvention(fixture_git_repo)
+    paste_copy(fixture_git_repo)
+    run_hook(["check"], fixture_git_repo)
+    reason = json.loads(capsys.readouterr().out)["reason"].split("\n\n")
+    assert ["is a copy of" in reason[0], "reimplements" in reason[1], reason[2].startswith("note:")] == [True] * 3
+
+
+def test_new_dependency_is_a_note_not_a_block(fixture_git_repo, capsys):
+    run_hook(["start"], fixture_git_repo)
+    add_new_import(fixture_git_repo, "polars")
+    run_hook(["check"], fixture_git_repo)
+    out = json.loads(capsys.readouterr().out)
+    assert "decision" not in out and "1 new dependencies" in out["systemMessage"]
+
+
+def test_syntax_error_file_does_not_break_check(fixture_git_repo, capsys):
+    run_hook(["start"], fixture_git_repo)
+    (fixture_git_repo / "broken.py").write_text("def f(:\n")
+    run_hook(["check"], fixture_git_repo)
+    assert "internal error" not in json.loads(capsys.readouterr().out)["systemMessage"]
+
+
+def test_second_check_recomputes_no_shapes(fixture_git_repo, capsys, monkeypatch):
+    import slopgate.cli
+    calls = []
+    real = slopgate.cli.shapes_of
+    monkeypatch.setattr("slopgate.cli.shapes_of", lambda p, t: calls.append(p) or real(p, t))
+    run_hook(["start"], fixture_git_repo)
+    paste_copy(fixture_git_repo)
+    run_hook(["check"], fixture_git_repo)
+    assert len(calls) == len(set(calls)) + 1  # only b.py differs between before and after
+    calls.clear()
+    run_hook(["check"], fixture_git_repo)
+    assert calls == []
+
+
+def test_deeply_nested_shape_cache_is_ignored_and_replaced(fixture_git_repo, capsys):
+    run_hook(["start"], fixture_git_repo)
+    paste_copy(fixture_git_repo)
+    (fixture_git_repo / ".git/slopgate/shapes.json").write_text("[" * 1_000_000 + "]" * 1_000_000)  # json.loads raises RecursionError
+    run_hook(["check"], fixture_git_repo)
+    run_hook(["check"], fixture_git_repo)
+    first, second = (json.loads(line) for line in capsys.readouterr().out.splitlines())
+    assert first["decision"] == "block" and "internal error" not in second["systemMessage"]
+
+
+@pytest.mark.parametrize("forge,salt", [({"line": "1"}, True), ({"bases": "XYZ"}, True), ({}, False)])
+def test_forged_or_unversioned_cache_entry_is_recomputed(fixture_git_repo, capsys, forge, salt):
+    import hashlib
+    from slopgate.cli import SHAPES_VERSION
+    run_hook(["start"], fixture_git_repo)
+    paste_copy(fixture_git_repo)
+    text = (fixture_git_repo / "b.py").read_text()
+    bad = {"path": "b.py", "qualname": pasted_name(), "module": "b", "line": 3, "end_line": 10, "cls": None,
+           "bases": [], "exact_key": "x", "near_key": "y", "consts": [], "comparable": False, **forge}
+    key = hashlib.sha256((f"{SHAPES_VERSION}\0" * salt + f"b.py\0{text}").encode()).hexdigest()
+    (fixture_git_repo / ".git/slopgate/shapes.json").write_text(json.dumps({key: [bad]}))
+    run_hook(["check"], fixture_git_repo)
+    assert json.loads(capsys.readouterr().out)["decision"] == "block"
+
+
+def test_notes_reach_the_summary_when_not_blocking(fixture_git_repo, capsys):
+    run_hook(["start"], fixture_git_repo)
+    add_forwarding_wrapper(fixture_git_repo)
+    run_hook(["check"], fixture_git_repo)
+    msg = json.loads(capsys.readouterr().out)["systemMessage"]
+    assert msg.endswith("\n\nnote: wrap.py:4 join_paths only forwards to os.path.join and has at most one call site found by name.")
+
+
+def test_scan_reports_existing_copies(fixture_git_repo_with_two_copies, capsys):
+    assert main(["scan", str(fixture_git_repo_with_two_copies)]) == 0
+    assert capsys.readouterr().out == "copy:\n  a.py:1 weighted_total\n  b.py:1 weighted_total_b\n"
+    assert not (fixture_git_repo_with_two_copies / ".git/slopgate").exists()
+
+
+def test_scan_prints_src_groups_before_test_groups_then_wrappers(tmp_path, capsys):
+    subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / "tests").mkdir()
+    other = WEIGHTED.replace("total -= price", "total += price")  # a different body, so a separate group
+    (tmp_path / "tests/test_a.py").write_text(other + "\n\n" + other.replace("weighted_total", "t2"))
+    (tmp_path / "z.py").write_text(WEIGHTED + "\n\n" + WEIGHTED.replace("weighted_total", "z2")
+                                   + "\n\ndef fwd(a):\n    return len(a)\n")
+    assert main(["scan", str(tmp_path)]) == 0
+    out = capsys.readouterr().out
+    assert out.index("z.py:1") < out.index("tests/test_a.py") < out.index("note: z.py")
+
+
+def test_scan_outside_git_repo(tmp_path, capsys):
+    assert main(["scan", str(tmp_path)]) == 0
+    assert "not a git repo" in capsys.readouterr().out

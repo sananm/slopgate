@@ -12,7 +12,10 @@ class Changes:
 
 def classify(before: list[FunctionInfo], after: list[FunctionInfo]) -> Changes:
     old = {(f.module, f.qualname): f.body_key for f in before}
-    old_bodies = {f.body_key for f in before}
+    now = {(f.module, f.qualname): f.body_key for f in after}
+    # a body is "moved" only if none of its original locations still holds it unchanged
+    kept = {k for loc, k in old.items() if now.get(loc) == k}
+    old_bodies = {f.body_key for f in before} - kept
     ch = Changes()
     for f in after:
         prev = old.get((f.module, f.qualname))

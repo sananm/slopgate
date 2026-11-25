@@ -15,7 +15,7 @@ def load_rounds(repo: Path, task_id: str) -> dict:
             return data
     except (OSError, ValueError):
         pass
-    return {"task_id": task_id, "round": 0, "last_findings_sha": None, "last_findings": ""}
+    return {"task_id": task_id, "round": 0, "last_findings_sha": None, "last_findings": "", "asked": []}
 
 
 def should_block(repo: Path, task_id: str, findings_text: str) -> bool:
@@ -25,3 +25,21 @@ def should_block(repo: Path, task_id: str, findings_text: str) -> bool:
     state.update(round=state["round"] + 1, last_findings_sha=sha, last_findings=findings_text)
     (state_dir(repo) / "rounds.json").write_text(json.dumps(state))
     return block
+
+
+def asked(repo: Path, task_id: str) -> set[str]:
+    """Keys already asked about in this task; a malformed value reads as empty."""
+    value = load_rounds(repo, task_id).get("asked")
+    if isinstance(value, list) and all(isinstance(k, str) for k in value):
+        return set(value)
+    return set()
+
+
+def record_asked(repo: Path, task_id: str, keys: list[str]) -> None:
+    """Remember keys as asked. Best-effort: a failed write only means a question may repeat."""
+    state = load_rounds(repo, task_id)
+    state["asked"] = sorted(asked(repo, task_id) | set(keys))
+    try:
+        (state_dir(repo) / "rounds.json").write_text(json.dumps(state))
+    except OSError:
+        pass

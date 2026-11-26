@@ -78,7 +78,7 @@ All of these must hold:
 1. **A new function.** It is not in a test file, not a dunder, at least 40 AST nodes, not an override of a method from a base class in the repo, and has no copy, near-copy or proven finding already.
 2. **A close match.** Its embedding scores at least **0.80** cosine similarity against a function in the repo as it was when the task started.
 3. **Not a known look-alike.** The pair passes four filters: not the same method name on a different class (parallel implementations), not caller and callee, no `mock` or `fake` in either path, and not two methods of the same class.
-4. **The judge agrees.** A model judges the pair (see below) and must answer that the new function re-implements logic that already exists: it should call the existing function, or the two should share a helper. Up to 3 pairs per check are judged, highest score first, in parallel, within 20 s.
+4. **The judge agrees.** A model judges the pair (see below) and must answer that the new function re-implements logic that already exists: it should call the existing function, or the two should share a helper. Up to 3 pairs per check are judged, highest score first, in parallel, with 20 s per call and a 25 s hard backstop.
 
 Each existing function is asked about at most once per task, and questions count toward the round limit. The question names the existing function and the number of exact copies of it:
 

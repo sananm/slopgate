@@ -67,6 +67,71 @@ Measured on the same repo before the `clamp` helper was added: 1,546 functions i
 
 Without the planted helper, slopgate would have judged nothing in this repo. That is the current limitation: it only acts on plain, builtin-typed functions, and methods and async functions are the obvious next work.
 
+## Semantic questions (M3)
+
+The common case is neither a copy nor provably the same function: the agent writes the same idea again in a different way. An earlier live run on `predictive-scaling` showed this. The agent wrote `_infer_frequency_seconds` while `_infer_frequency_minutes` already existed in five places, and slopgate let it through. M3 does not claim these are duplicates. It blocks once with a question, and the agent decides.
+
+### What triggers a question
+
+All of these must hold:
+
+1. **A new function.** It is not in a test file, not a dunder, at least 40 AST nodes, not an override of a method from a base class in the repo, and has no copy, near-copy or proven finding already.
+2. **A close match.** Its embedding scores at least **0.80** cosine similarity against a function in the repo as it was when the task started.
+3. **Not a known look-alike.** The pair passes four filters: not the same method name on a different class (parallel implementations), not caller and callee, no `mock` or `fake` in either path, and not two methods of the same class.
+4. **The judge agrees.** A model judges the pair (see below) and must answer that the new function re-implements logic that already exists: it should call the existing function, or the two should share a helper. Up to 3 pairs per check are judged, highest score first, in parallel, within 20 s.
+
+Each existing function is asked about at most once per task, and questions count toward the round limit. The question names the existing function and the number of exact copies of it:
+
+```
+question: src/features/volatility_features.py:91 VolatilityFeatureExtractor._infer_frequency_seconds
+  looks like src/features/derivative_features.py:182 DerivativeFeatureExtractor._infer_frequency_minutes (and 4 copies of it).
+  Reuse it or share a helper with it, or reply with why the new one is different.
+```
+
+It is a question, not a finding. A reasoned "they differ because..." is an accepted answer, and a question the agent answered is not reported as unresolved.
+
+### Privacy: the judge runs at Google
+
+The judge is Gemini 4 Hydrogen, called through the `agy` CLI. **It sends the source, paths and names of both functions to Google.** Everything else in slopgate, embeddings included, runs on the machine. `agy` runs from an empty temporary directory, so it sees only the prompt. Verdicts are cached in `.git/slopgate/verdicts.json`, so the same pair is not sent twice.
+
+If `agy` is not installed, or the call times out, fails or returns anything but a clean "reuse", no question is asked. **Without `agy`, the semantic check stays silent.**
+
+### How the cutoff was chosen
+
+The replay treated every eligible function in three repos as new and the rest of its repo as the pool: `predictive-scaling` and the two other private repos from the scan above, 795 functions in all. Pairs were labeled by hand as worth asking or not, by a single labeler, under the rule above.
+
+**The cutoff was chosen on these same repos, so these numbers are in-sample.**
+
+| Stage | At cutoff | Functions asked | Sampled questions worth asking |
+|---|---|---|---|
+| Similarity only | 0.84 | 16.0% | 0 of 10 |
+| + pair filters | 0.84 | 2.3% | 2 of 10 |
+| + filters and judge | 0.80 (shipped) | 17 of 795 (2.1%) | 15 of 17 (88%) |
+
+The targets were at most 2% of functions asked and at least 80% worth asking. 0.80 asks 2.1%. 0.82 would ask 1.3% at 80% (8 of 10), so it sits exactly on the precision target with fewer samples. At 0.80, every pair the judge passed was labeled.
+
+Per repo at 0.80:
+
+| Repo | Eligible functions | Asked | Worth asking |
+|---|---|---|---|
+| `predictive-scaling` | 574 | 12 (2.1%) | 10 of 12 |
+| second repo | 122 | 2 (1.6%) | 2 of 2 |
+| third repo | 99 | 3 (3.0%) | 3 of 3 |
+
+Each duplicate is counted once from each side, so the 17 questions cover fewer distinct situations. The judge agreed with the hand labels on 66 of 74 labeled pairs (89%), over 179 calls with no failures. Embedding scores depend on the model version, so the cutoff belongs to the current embedding model.
+
+With a warm cache, the similarity step adds 0.34 s to a Stop on `predictive-scaling`. A judge call takes about 6 s wall-clock, and only pairs that pass the cutoff and the filters are judged.
+
+### Live re-run
+
+The volatility task was re-run headless on a fresh clone of `predictive-scaling` with M3 installed (`claude -p`, `--permission-mode acceptEdits`). The earlier live run had the author's global Claude Code plugins loaded, including one that pushes the agent toward reuse, which confounded it. This run used `--setting-sources project,local`, so only the repo's own settings and hooks were loaded.
+
+- **Round 1:** the agent added a `VolatilityFeatureExtractor` with 10 new functions, including `_infer_frequency_seconds`. The Stop hook asked the question shown above and blocked, taking 9.8 s, most of it the uncached judge call.
+- **The agent's answer:** it kept a separate function and said why. The existing helpers truncate the sampling interval to whole minutes, so 30-second data is read as 1-minute data and a "15-minute" window covers 30 minutes. It moved the new helper into the shared `BaseExtractor` instead of keeping it private, and added a 30-second test case. It left the five existing copies unchanged, because switching them would change their features. A reviewer would accept that reason.
+- **Round 2:** no new questions, and the stop was allowed after 2.4 s.
+
+Three ordinary small tasks were then run the same way on fresh clones: an alert summary method, an sMAPE accuracy metric, and a cooldown-remaining method on the decision engine. None of them got a question, and no pair reached the judge. Their Stop hooks took 3.6 s, 3.6 s and 2.9 s. In all four runs, the agent's attempts to run the tests were outside the allowed commands, so its tests were not run.
+
 ## Install
 
 ```bash

@@ -19,6 +19,11 @@ def no_model(monkeypatch):
     monkeypatch.setattr("slopgate.cli.default_embed", lambda: fake_embed)
 
 
+@pytest.fixture(autouse=True)
+def judge_says_reuse(monkeypatch):
+    monkeypatch.setattr("slopgate.cli.judge", lambda repo, qs: qs)
+
+
 @pytest.fixture
 def fixture_git_repo(fixture_repo, tmp_path):
     dst = tmp_path / "repo"
@@ -159,7 +164,7 @@ def test_stats_line_written_per_check(fixture_git_repo):
     run_hook(["start"], fixture_git_repo)
     run_hook(["check"], fixture_git_repo)
     assert set(last_stats(fixture_git_repo)) == {"task_id", "round", "new", "judgeable", "findings", "resolved", "skipped", "seconds",
-                                                 "copies", "near", "wrapper_notes", "new_deps"}
+                                                 "copies", "near", "questions", "left_out", "wrapper_notes", "new_deps"}
 
 
 def test_install_merges_without_duplicates(tmp_path):
@@ -203,7 +208,7 @@ def test_model_is_not_loaded_when_nothing_new_is_judgeable(fixture_git_repo, cap
     (fixture_git_repo / "newmod.py").write_text("def load(p: str) -> str:\n    return open(p).read()\n")
     run_hook(["check"], fixture_git_repo)
     msg = json.loads(capsys.readouterr().out)["systemMessage"]
-    assert msg.startswith("slopgate: 0 copies, 0 near-copies, 0 wrapper notes, 0 new dependencies, 1 new functions, 0 judgeable") and "boom" not in msg
+    assert msg.startswith("slopgate: 0 copies, 0 near-copies, 0 questions, 0 wrapper notes, 0 new dependencies, 1 new functions, 0 judgeable") and "boom" not in msg
 
 
 def test_pasted_copy_blocks_with_copy_finding(fixture_git_repo, capsys):
@@ -212,7 +217,7 @@ def test_pasted_copy_blocks_with_copy_finding(fixture_git_repo, capsys):
     run_hook(["check"], fixture_git_repo)
     out = json.loads(capsys.readouterr().out)
     assert out["decision"] == "block" and "is a copy of" in out["reason"] and "1 copies" in out["systemMessage"]
-    assert out["systemMessage"].startswith("slopgate: 1 copies, 0 near-copies, 0 wrapper notes, 0 new dependencies, 1 new functions")
+    assert out["systemMessage"].startswith("slopgate: 1 copies, 0 near-copies, 0 questions, 0 wrapper notes, 0 new dependencies, 1 new functions")
 
 
 def test_rename_local_in_one_of_existing_copies_does_not_block(fixture_git_repo_with_two_copies, capsys):
@@ -345,3 +350,189 @@ def test_scan_prints_src_groups_before_test_groups_then_wrappers(tmp_path, capsy
 def test_scan_outside_git_repo(tmp_path, capsys):
     assert main(["scan", str(tmp_path)]) == 0
     assert "not a git repo" in capsys.readouterr().out
+
+
+LEDGER = '''class Ledger:
+    def tally(self, rows):
+        acc = 0
+        for row in rows:
+            if row.qty > 0 and row.active:
+                acc += row.qty * row.price
+            elif row.refund:
+                acc -= row.price
+        return int(acc)
+'''
+
+
+def steered(calls=None):
+    """weighted_total's original body and Ledger.tally are 0.9-similar; everything else is far from both."""
+    def embed(texts):
+        if calls is not None:
+            calls.append(list(texts))
+        return [[1.0, 0.0, 0.0] if "total -= price" in t else [0.9, 0.436, 0.0] if "acc += row.qty" in t
+                else [0.0, 0.0, 1.0] for t in texts]
+    return embed
+
+
+@pytest.fixture
+def steer(monkeypatch):
+    calls = []
+    monkeypatch.setattr("slopgate.cli.default_embed", lambda: steered(calls))
+    return calls
+
+
+def test_similar_new_method_gets_one_question_then_allows(fixture_git_repo, capsys, steer):
+    run_hook(["start"], fixture_git_repo)
+    (fixture_git_repo / "ledger.py").write_text(LEDGER)
+    run_hook(["check"], fixture_git_repo)
+    first = json.loads(capsys.readouterr().out)
+    assert first["decision"] == "block" and "question: ledger.py:2 Ledger.tally" in first["reason"]
+    assert "a.py:1 weighted_total" in first["reason"] and "1 questions" in first["systemMessage"]
+    assert last_stats(fixture_git_repo)["questions"] == 1
+    run_hook(["check"], fixture_git_repo)
+    second = json.loads(capsys.readouterr().out)
+    assert "decision" not in second and "question:" not in second["systemMessage"]
+    assert (last_stats(fixture_git_repo)["questions"], last_stats(fixture_git_repo)["resolved"]) == (0, 0)
+
+
+def test_judged_noise_allows_without_question(fixture_git_repo, capsys, steer, monkeypatch):
+    from slopgate.judge_model import judge
+    real_run, calls = subprocess.run, []
+
+    def agy(cmd, *a, **k):
+        if cmd[0] != "agy":
+            return real_run(cmd, *a, **k)
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, '{"status": "SUCCESS", "structured_output": {"verdict": "noise"}}', "")
+    monkeypatch.setattr("slopgate.cli.judge", judge)
+    monkeypatch.setattr("slopgate.judge_model.subprocess.run", agy)
+    run_hook(["start"], fixture_git_repo)
+    (fixture_git_repo / "ledger.py").write_text(LEDGER)
+    run_hook(["check"], fixture_git_repo)
+    out = json.loads(capsys.readouterr().out)
+    assert "decision" not in out and "question:" not in out["systemMessage"]
+    assert "semantic check skipped" not in out["systemMessage"] and len(calls) == 1
+    assert last_stats(fixture_git_repo)["questions"] == 0
+
+
+def test_rename_after_question_does_not_reask(fixture_git_repo, capsys, steer):
+    run_hook(["start"], fixture_git_repo)
+    (fixture_git_repo / "ledger.py").write_text(LEDGER)
+    run_hook(["check"], fixture_git_repo)
+    (fixture_git_repo / "ledger.py").write_text(LEDGER.replace("tally", "sum_rows"))
+    run_hook(["check"], fixture_git_repo)
+    first, second = (json.loads(line) for line in capsys.readouterr().out.splitlines())
+    assert first["decision"] == "block" and "decision" not in second and "question:" not in second["systemMessage"]
+
+
+def test_override_and_tiny_methods_never_load_the_model(fixture_git_repo, capsys, monkeypatch):
+    (fixture_git_repo / "base.py").write_text("class BaseExtractor:\n    def extract(self, rows):\n        return rows\n")
+    git_commit_all(fixture_git_repo)
+    monkeypatch.setattr("slopgate.cli.default_embed", boom)
+    run_hook(["start"], fixture_git_repo)
+    body = LEDGER.split("\n", 2)[2]
+    (fixture_git_repo / "ext.py").write_text("from base import BaseExtractor\n\n\nclass RowExtractor(BaseExtractor):\n"
+                                             "    def extract(self, rows):\n" + body
+                                             + "\n    def name(self):\n        return 'rows'\n")
+    run_hook(["check"], fixture_git_repo)
+    msg = json.loads(capsys.readouterr().out)["systemMessage"]
+    assert "0 questions" in msg and "question:" not in msg and "boom" not in msg and "skipped:" not in msg
+
+
+def test_uncached_pool_is_capped_and_reported(fixture_git_repo, capsys, steer):
+    from slopgate.cli import MAX_HOOK_EMBEDS
+    (fixture_git_repo / "many.py").write_text("".join(f"def f{i}(x):\n    return x + {i}\n\n\n" for i in range(40)))
+    git_commit_all(fixture_git_repo)
+    run_hook(["start"], fixture_git_repo)
+    (fixture_git_repo / "ledger.py").write_text(LEDGER)
+    run_hook(["check"], fixture_git_repo)
+    msg = json.loads(capsys.readouterr().out)["systemMessage"]
+    assert sum(map(len, steer)) <= 1 + MAX_HOOK_EMBEDS
+    assert "functions not yet embedded" in msg and last_stats(fixture_git_repo)["left_out"] > 0
+
+
+def test_model_failure_skips_semantic_and_allows(fixture_git_repo, capsys, monkeypatch):
+    monkeypatch.setattr("slopgate.cli.default_embed", boom)
+    run_hook(["start"], fixture_git_repo)
+    (fixture_git_repo / "ledger.py").write_text(LEDGER)
+    run_hook(["check"], fixture_git_repo)
+    out = json.loads(capsys.readouterr().out)
+    assert "decision" not in out and "semantic check skipped: RuntimeError" in out["systemMessage"]
+
+
+def test_failed_model_load_is_not_retried_by_m1(fixture_git_repo, capsys, monkeypatch):
+    calls = []
+
+    def load():
+        calls.append(1)
+        raise RuntimeError("boom")
+    monkeypatch.setattr("slopgate.cli.default_embed", load)
+    run_hook(["start"], fixture_git_repo)
+    (fixture_git_repo / "ledger.py").write_text(LEDGER)  # M3 needs the model
+    add_reinvention(fixture_git_repo)  # M1 needs it too
+    run_hook(["check"], fixture_git_repo)
+    out = json.loads(capsys.readouterr().out)
+    assert calls == [1] and "decision" not in out
+
+
+def test_question_dropped_when_m1_proves_it(fixture_git_repo, capsys, steer, monkeypatch):
+    from slopgate.reinvention import CheckResult, Finding
+
+    def prover(repo, changes, *a, **k):
+        old = next(f for f in changes.existing if f.qualname == "weighted_total")
+        return CheckResult([Finding(f, old, 100) for f in changes.new if f.qualname == "Ledger.tally"], len(changes.new), 1)
+    monkeypatch.setattr("slopgate.cli.find_reinventions", prover)
+    run_hook(["start"], fixture_git_repo)
+    (fixture_git_repo / "ledger.py").write_text(LEDGER)
+    run_hook(["check"], fixture_git_repo)
+    out = json.loads(capsys.readouterr().out)
+    assert out["decision"] == "block" and "reimplements" in out["reason"] and "question:" not in out["reason"]
+    assert last_stats(fixture_git_repo)["questions"] == 0
+
+
+def test_deleted_original_is_never_named(fixture_git_repo, capsys, steer):
+    run_hook(["start"], fixture_git_repo)
+    (fixture_git_repo / "a.py").write_text("")
+    (fixture_git_repo / "ledger.py").write_text(LEDGER)
+    run_hook(["check"], fixture_git_repo)
+    out = json.loads(capsys.readouterr().out)
+    assert "weighted_total" not in out.get("reason", "") + out["systemMessage"]
+
+
+def test_modified_original_is_compared_in_its_snapshot_version(fixture_git_repo, capsys, steer):
+    run_hook(["start"], fixture_git_repo)
+    (fixture_git_repo / "a.py").write_text(WEIGHTED.replace("total -= price", "total -= 2 * price"))
+    (fixture_git_repo / "ledger.py").write_text(LEDGER)
+    run_hook(["check"], fixture_git_repo)
+    out = json.loads(capsys.readouterr().out)
+    assert out["decision"] == "block" and "looks like a.py:1 weighted_total" in out["reason"]
+
+
+def test_extracted_helper_called_by_its_changed_source_is_not_asked(fixture_git_repo, capsys, steer):
+    run_hook(["start"], fixture_git_repo)
+    (fixture_git_repo / "a.py").write_text("from ledger import Ledger\n\n\ndef weighted_total(prices, weights):\n"
+                                           "    return Ledger().tally(zip(prices, weights))\n")
+    (fixture_git_repo / "ledger.py").write_text(LEDGER)
+    run_hook(["check"], fixture_git_repo)
+    out = json.loads(capsys.readouterr().out)
+    assert "question:" not in out.get("reason", "") + out["systemMessage"]
+
+
+def test_install_pre_embeds_the_pool(fixture_git_repo, monkeypatch):
+    from slopgate.index import index_repo
+    from slopgate.reinvention import cached_embeddings
+    from slopgate.semantic import semantic_pool
+    from slopgate.snapshot import _read_py_files
+    calls = []
+    monkeypatch.setattr("slopgate.cli.default_embed", lambda: steered(calls))
+    assert main(["install", str(fixture_git_repo)]) == 0
+    sources = [f.source for f in semantic_pool(index_repo(fixture_git_repo, _read_py_files(fixture_git_repo)))]
+    assert sources and {t for c in calls for t in c} == set(sources)
+    calls.clear()
+    cached_embeddings(fixture_git_repo, [], sources, steered(calls), None)
+    assert calls == []
+
+
+def test_install_outside_a_git_repo_still_installs(tmp_path, capsys):
+    assert main(["install", str(tmp_path)]) == 0
+    assert "slopgate check" in all_hook_commands(tmp_path) and "CalledProcessError" in capsys.readouterr().err

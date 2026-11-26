@@ -9,18 +9,21 @@ import sys
 import time
 from pathlib import Path
 
-from slopgate.changes import classify
+from slopgate.changes import Changes, classify
 from slopgate.clones import clone_groups, clone_key, find_clones, format_clone
 from slopgate.deps import find_new_deps, format_new_dep
-from slopgate.index import index_repo
-from slopgate.reinvention import default_embed, find_reinventions, format_finding
-from slopgate.rounds import load_rounds, should_block
+from slopgate.index import FunctionInfo, index_repo
+from slopgate.judge_model import judge
+from slopgate.reinvention import Embed, cached_embeddings, default_embed, find_reinventions, format_finding
+from slopgate.rounds import asked, load_rounds, record_asked, should_block
 from slopgate.sandbox import pick_interpreter, sandbox_kind
+from slopgate.semantic import Question, find_questions, format_question, question_key, semantic_candidates, semantic_pool
 from slopgate.snapshot import _read_py_files, changed_py_files, load_snapshot, state_dir, take_snapshot
 from slopgate.structure import Shape, index_shapes, is_test_path, shapes_of
 from slopgate.wrappers import find_wrappers, format_wrapper
 
 BUDGET_S = 20.0
+MAX_HOOK_EMBEDS = 16  # uncached pool functions embedded per Stop; keeps M3 within its 5 s worst case
 SHAPES_VERSION = 1  # bump when shapes_of output changes, so cached shapes are recomputed
 HOOKS = {"UserPromptSubmit": "slopgate start", "Stop": "slopgate check"}
 
@@ -83,6 +86,27 @@ def _shape_sets(repo: Path, *text_sets: dict[str, str]) -> list[list[Shape]]:
     return out
 
 
+def _questions(repo: Path, task_id: str, changes: Changes, snap_index: list[FunctionInfo], before: list[Shape], after: list[Shape],
+               skip: set[tuple[str, str]], embed: Embed) -> tuple[list[Question], int]:
+    """M3: new functions that strongly resemble an existing one, minus those already asked this task or judged noise."""
+    cands = semantic_candidates(changes.new, after, skip)
+    old = {(f.path, f.qualname): f for f in snap_index}
+    pool = {(f.path, f.qualname): f for f in changes.existing}
+    for f in changes.changed:  # compared as it was before the agent touched it
+        if (f.path, f.qualname) in old:
+            pool.setdefault((f.path, f.qualname), old[f.path, f.qualname])
+    own = {(c.path, c.qualname) for c in cands}
+    pool = sorted((f for f in semantic_pool(list(pool.values())) if (f.path, f.qualname) not in own),
+                  key=lambda f: (f.path, f.qualname))
+    if not cands or not pool:
+        return [], 0
+    vecs, left = cached_embeddings(repo, [c.source for c in cands], [p.source for p in pool], embed, MAX_HOOK_EMBEDS)
+    done = asked(repo, task_id)
+    qs = find_questions(cands, pool, vecs, {(s.path, s.qualname): s.exact_key for s in before},
+                        {(f.path, f.qualname): f for f in changes.changed})
+    return judge(repo, [q for q in qs if question_key(q) not in done]), left
+
+
 def _check(t0: float) -> dict:
     repo = _repo_from_stdin()
     snap = load_snapshot(repo)
@@ -91,8 +115,8 @@ def _check(t0: float) -> dict:
     changed = changed_py_files(repo, snap)
     now = {p: t for p, t in snap.files.items() if p not in changed}  # unchanged since the snapshot
     now.update({p: (repo / p).read_text(encoding="utf-8", errors="replace") for p in changed if (repo / p).is_file()})
-    changes = classify(index_repo(repo, {p: snap.files[p] for p in changed if p in snap.files}),
-                       index_repo(repo, {p: now[p] for p in changed if p in now}))
+    snap_index = index_repo(repo, {p: snap.files[p] for p in changed if p in snap.files})
+    changes = classify(snap_index, index_repo(repo, {p: now[p] for p in changed if p in now}))
     changes.existing += index_repo(repo, {p: t for p, t in now.items() if p not in changed})
 
     before, after = _shape_sets(repo, snap.files, now)
@@ -105,32 +129,61 @@ def _check(t0: float) -> dict:
     wrappers = find_wrappers(new_ids, now) if new_ids else []
     deps = find_new_deps({p for p in changed if p in now}, now, snap.files) if changed else []
 
-    model = functools.cache(default_embed)  # loaded on the first embedding actually needed, if any
-    embed = lambda texts: model()(texts)  # noqa: E731
+    @functools.cache  # loaded on the first embedding actually needed, if any
+    def model():
+        try:
+            return default_embed()
+        except Exception as e:  # remembered, so M1 does not retry a failed load
+            return e
+
+    def embed(texts):
+        m = model()
+        if isinstance(m, Exception):
+            raise m
+        return m(texts)
+    try:
+        questions, left = _questions(repo, snap.task_id, changes, snap_index, before, after,
+                                     {(c.new.path, c.new.qualname) for c in clones}, embed)
+        sem_error = ""
+    except Exception as e:  # M3 must never break the check: no questions
+        questions, left, sem_error = [], 0, f", semantic check skipped: {type(e).__name__}"
     result = find_reinventions(repo, changes, embed, pick_interpreter(repo),
                                budget_s=max(0.0, BUDGET_S - (time.monotonic() - t0)))
 
+    proven = {(f.new.path, f.new.qualname) for f in result.findings}
+    questions = [q for q in questions if (q.new.path, q.new.qualname) not in proven]
     blocking = [c for c in clones if c.blocking]
     found = [format_clone(c) for c in blocking] + [format_finding(f) for f in result.findings]
+    asks = [format_question(q) for q in questions]
     notes = ([format_clone(c) for c in clones if not c.blocking] + [format_wrapper(w) for w in wrappers]
              + [format_new_dep(d) for d in deps])
     # identity without line numbers, so edits above a finding don't make it look new
     keys = sorted({clone_key(c) for c in blocking}
-                  | {f"reinvention\t{f.new.path}\t{f.new.qualname}\t{f.existing.path}\t{f.existing.qualname}" for f in result.findings})
+                  | {f"reinvention\t{f.new.path}\t{f.new.qualname}\t{f.existing.path}\t{f.existing.qualname}" for f in result.findings}
+                  | {f"question\t{q.new.path}\t{q.new.qualname}\t{question_key(q)}" for q in questions})
     previous = load_rounds(repo, snap.task_id)["last_findings"]
-    resolved = sum(k not in keys for k in previous.split("\n") if k)
+    resolved = sum(k not in keys for k in previous.split("\n") if k and not k.startswith("question\t"))  # a question is never "resolved"
+    block = should_block(repo, snap.task_id, "\n".join(keys)) and bool(found + asks)
+    if block:
+        record_asked(repo, snap.task_id, [question_key(q) for q in questions])
+        found += asks
+    else:
+        notes = [f"note: {a}" for a in asks] + notes
     text = "\n\n".join(found + notes)
-    block = should_block(repo, snap.task_id, "\n".join(keys)) and bool(found)
     copies, near = (sum(c.kind == k for c in clones) for k in ("copy", "near"))
     stats = {"task_id": snap.task_id, "round": load_rounds(repo, snap.task_id)["round"],
              "new": new_count, "judgeable": result.judgeable_count, "findings": len(result.findings),
              "resolved": resolved, "skipped": result.skipped, "copies": copies, "near": near,
-             "wrapper_notes": len(wrappers), "new_deps": len(deps), "seconds": round(time.monotonic() - t0, 2)}
+             "questions": len(questions), "left_out": left, "wrapper_notes": len(wrappers), "new_deps": len(deps),
+             "seconds": round(time.monotonic() - t0, 2)}
     with open(state_dir(repo) / "stats.jsonl", "a") as f:
         f.write(json.dumps(stats) + "\n")
-    summary = (f"slopgate: {copies} copies, {near} near-copies, {len(wrappers)} wrapper notes, {len(deps)} new dependencies, "
+    summary = (f"slopgate: {copies} copies, {near} near-copies, {len(questions)} questions, {len(wrappers)} wrapper notes, "
+               f"{len(deps)} new dependencies, "
                f"{new_count} new functions, {result.judgeable_count} judgeable, "
-               f"{len(result.findings)} findings, {result.skipped} skipped") + (" (running unsandboxed)" if sandbox_kind() == "none" else "")
+               f"{len(result.findings)} findings, {result.skipped} skipped"
+               + (f" ({left} functions not yet embedded)" if left else "") + sem_error
+               + (" (running unsandboxed)" if sandbox_kind() == "none" else ""))
     if block:
         return {"decision": "block", "reason": text, "systemMessage": summary}
     return {"systemMessage": "\n\n".join([summary, *found, *notes])}
@@ -188,10 +241,23 @@ def install(repo: Path) -> int:
     print(f"slopgate: hooks installed in {path}")
     print("slopgate: loading the embedding model (first run downloads it)...", file=sys.stderr)
     try:
-        default_embed()  # warm the cache now so the first Stop hook doesn't stall on a download
+        model = default_embed()  # warm the cache now so the first Stop hook doesn't stall on a download
     except Exception as e:
         print(f"slopgate: model warm-up failed, the first check will retry: {type(e).__name__}: {e}", file=sys.stderr)
+        return 0
+    try:
+        warm_embeddings(repo, model)
+    except Exception as e:
+        print(f"slopgate: pre-embedding failed, checks will embed as they go: {type(e).__name__}: {e}", file=sys.stderr)
     return 0
+
+
+def warm_embeddings(repo: Path, embed: Embed) -> int:
+    """Fill the embedding cache with the semantic pool, so the Stop hook rarely embeds existing code."""
+    sources = [f.source for f in semantic_pool(index_repo(repo, _read_py_files(repo)))]
+    print(f"slopgate: embedding {len(sources)} functions (one-time, can take a few minutes)...", file=sys.stderr)
+    cached_embeddings(repo, [], sources, embed, None)
+    return len(sources)
 
 
 def main(argv: list[str] | None = None) -> int:

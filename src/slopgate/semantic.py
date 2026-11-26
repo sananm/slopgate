@@ -8,7 +8,7 @@ from slopgate.index import FunctionInfo
 from slopgate.reinvention import _cosine
 from slopgate.structure import Shape, is_test_path
 
-SEMANTIC_CUTOFF = 0.84  # provisional until the replay is reviewed
+SEMANTIC_CUTOFF = 0.80  # tuned on three repos with filters + judge (spec §10); chosen by Sanan
 
 
 @dataclass(frozen=True)

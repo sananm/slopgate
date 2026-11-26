@@ -1,5 +1,8 @@
 """M3: ask when a new function strongly resembles existing repo logic."""
+import ast
+import textwrap
 from dataclasses import dataclass
+from functools import lru_cache
 
 from slopgate.index import FunctionInfo
 from slopgate.reinvention import _cosine
@@ -40,6 +43,48 @@ def semantic_pool(functions: list[FunctionInfo]) -> list[FunctionInfo]:
     return [f for f in functions if not is_test_path(f.path) and not _dunder(f)]
 
 
+def _name(f: FunctionInfo) -> str:
+    return f.qualname.rsplit(".", 1)[-1]
+
+
+def _cls(f: FunctionInfo) -> str | None:
+    return f.qualname.rsplit(".", 1)[0] if "." in f.qualname else None
+
+
+@lru_cache(maxsize=4096)
+def _called_names(source: str) -> frozenset[str]:
+    try:
+        tree = ast.parse(textwrap.dedent(source))
+    except SyntaxError:
+        return frozenset()
+    return frozenset(c.func.id if isinstance(c.func, ast.Name) else c.func.attr for c in ast.walk(tree)
+                     if isinstance(c, ast.Call) and isinstance(c.func, (ast.Name, ast.Attribute)))
+
+
+def _parallel(f: FunctionInfo, g: FunctionInfo) -> bool:
+    return f.is_method and g.is_method and _name(f) == _name(g) and _cls(f) != _cls(g)
+
+
+def _calls(f: FunctionInfo, g: FunctionInfo) -> bool:
+    return _name(g) in _called_names(f.source) or _name(f) in _called_names(g.source)
+
+
+def _test_double(f: FunctionInfo, g: FunctionInfo) -> bool:
+    return any(w in x.path.lower() for x in (f, g) for w in ("mock", "fake"))
+
+
+def _sibling(f: FunctionInfo, g: FunctionInfo) -> bool:
+    return f.is_method and g.is_method and _cls(f) == _cls(g)
+
+
+# pairs that look alike for a known reason; the replay imports these to measure each one
+PAIR_FILTERS = {"parallel": _parallel, "calls": _calls, "test_double": _test_double, "sibling": _sibling}
+
+
+def unrelated(f: FunctionInfo, g: FunctionInfo, filters=tuple(PAIR_FILTERS.values())) -> bool:
+    return not any(skip(f, g) for skip in filters)
+
+
 def find_questions(candidates: list[FunctionInfo], pool: list[FunctionInfo], vecs: dict[str, list[float]],
                    exact_keys: dict[tuple[str, str], str]) -> list[Question]:
     pool = [g for g in pool if g.source in vecs]
@@ -52,9 +97,15 @@ def find_questions(candidates: list[FunctionInfo], pool: list[FunctionInfo], vec
     for f in candidates:
         if f.source not in vecs or not pool:
             continue
-        best = max(pool, key=lambda g: _cosine(vecs[f.source], vecs[g.source]))
-        score = _cosine(vecs[f.source], vecs[best.source])
-        if score < SEMANTIC_CUTOFF:
+        best = None
+        # best first, ties in pool order; filters run only above the cutoff to keep parsing off the hot path
+        for score, g in sorted(((_cosine(vecs[f.source], vecs[g.source]), g) for g in pool), key=lambda t: -t[0]):
+            if score < SEMANTIC_CUTOFF:
+                break
+            if unrelated(f, g):
+                best = g
+                break
+        if best is None:
             continue
         group = groups.get(exact_keys.get((best.path, best.qualname)), [best])
         existing = min(group, key=lambda g: (g.path, g.qualname))

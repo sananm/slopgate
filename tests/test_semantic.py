@@ -79,3 +79,44 @@ def test_missing_vectors_are_ignored():
     (q,) = find_questions([n], [p1, p2], vecs, {})
     assert q.existing is p2
     assert find_questions([fi("src/x.py", 1, "nv")], [p2], vecs, {}) == []
+
+
+def _src(f, body):
+    return FunctionInfo(f.path, f.qualname, f.module, f.line, f.end_line, [], False, False, f.is_method, body, "bk")
+
+
+def _asked(new, pool):
+    vecs = {x.source: [1.0, 0.0] for x in [new, *pool]}
+    return [q.existing.qualname for q in find_questions([new], pool, vecs, {})]
+
+
+def test_skips_same_name_method_of_another_class():
+    new = fi("src/a.py", 1, "A.to_dict")
+    assert _asked(new, [fi("src/b.py", 1, "B.to_dict")]) == []
+    assert _asked(new, [fi("src/b.py", 1, "to_dict")]) == ["to_dict"]  # control: module function
+
+
+def test_skips_caller_and_callee():
+    new = _src(fi("src/a.py", 1, "route"), "    def route(self):\n        return self.repo.get_recent(5)\n")
+    callee = _src(fi("src/b.py", 1, "Repo.get_recent"), "def get_recent(self, n):\n    return self.rows[:n]\n")
+    caller = _src(fi("src/c.py", 1, "outer"), "def outer():\n    return route()\n")
+    other = _src(fi("src/d.py", 1, "other"), "def other():\n    return get_old(1)\n")
+    broken = _src(fi("src/e.py", 1, "broken"), "def broken(:\n")
+    assert _asked(new, [callee]) == []
+    assert _asked(new, [caller]) == []
+    assert _asked(new, [other]) == ["other"]  # control
+    assert _asked(new, [broken]) == ["broken"]  # unparseable: no calls found
+
+
+def test_skips_test_doubles_in_pool_and_candidates():
+    new = fi("src/client.py", 1, "paginate")
+    assert _asked(new, [fi("src/fake_github.py", 1, "paginate2")]) == []
+    assert _asked(new, [fi("eval/Mocks/x.py", 1, "p")]) == []
+    assert _asked(fi("src/fakes.py", 1, "p"), [fi("src/b.py", 1, "q")]) == []
+    assert _asked(new, [fi("src/b.py", 1, "q")]) == ["q"]  # control
+
+
+def test_skips_same_class_sibling_methods():
+    new = fi("src/a.py", 1, "H._days_since")
+    assert _asked(new, [fi("src/a.py", 2, "H._days_until")]) == []
+    assert _asked(new, [fi("src/a.py", 2, "G._days_until")]) == ["G._days_until"]  # control: other class

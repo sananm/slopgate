@@ -37,7 +37,7 @@ Each function is reduced to a normal form before comparing: the docstring, its n
 
 - **Copy (blocks).** A new or changed function whose normal form equals an existing one. The finding names the original and says to import it, move it to a shared helper, or move it into the shared base class.
 - **Near-copy (blocks).** A function equal to an existing one except for at most 3 numeric constants, at least one outside `{-1, 0, 1, 2}`, none used as an index. The finding says to add a parameter instead of copying.
-- **Reimplementation (blocks).** The M1 check, described below: a differently written function that agrees with an existing one on generated inputs.
+- **Reimplementation (blocks).** The execution check, described below: a differently written function that agrees with an existing one on generated inputs.
 - **Wrapper notes (advisory).** A function whose body only passes its parameters unchanged to another call, and that has at most one call site found by name, since a single-use wrapper should be inlined into its caller. Methods of classes with a base other than `object`, decorated functions, dunders and names in `__all__` are never reported.
 - **New-dependency notes (advisory).** New code that imports a third-party package the repo has never imported before.
 
@@ -47,7 +47,7 @@ Copies and near-copies that involve a test file are advisory, never blocks. Advi
 
 Not handled: **roundabout logic**, a long solution where a short one would do. Structure cannot judge readability. Copies that differ in more than numeric constants (a changed string, an extra statement) are not caught either.
 
-## Reimplementation (M1)
+## Reimplementation
 
 For differently written functions, slopgate does not trust similarity alone: it runs both functions in a sandbox on generated inputs, and blocks only if they agree on all of them.
 
@@ -67,9 +67,9 @@ Measured on the same repo before the `clamp` helper was added: 1,546 functions i
 
 Without the planted helper, slopgate would have judged nothing in this repo. That is the current limitation: it only acts on plain, builtin-typed functions, and methods and async functions are the obvious next work.
 
-## Semantic questions (M3)
+## Semantic questions
 
-The common case is neither a copy nor provably the same function: the agent writes the same idea again in a different way. An earlier live run on `predictive-scaling` showed this. The agent wrote `_infer_frequency_seconds` while `_infer_frequency_minutes` already existed in five places (the question below names it and its 4 copies), and slopgate let it through. M3 does not claim these are duplicates. It blocks once with a question, and the agent decides.
+The common case is neither a copy nor provably the same function: the agent writes the same idea again in a different way. An earlier live run on `predictive-scaling` showed this. The agent wrote `_infer_frequency_seconds` while `_infer_frequency_minutes` already existed in five places (the question below names it and its 4 copies), and slopgate let it through. The semantic check does not claim these are duplicates. It blocks once with a question, and the agent decides.
 
 ### What triggers a question
 
@@ -124,7 +124,7 @@ With a warm cache, the similarity step adds 0.34 s to a Stop on `predictive-scal
 
 ### Live re-run
 
-The volatility task was re-run headless on a fresh clone of `predictive-scaling` with M3 installed (`claude -p`, `--permission-mode acceptEdits`). The earlier live run had the author's global Claude Code plugins loaded, including one that pushes the agent toward reuse, which confounded it. This run used `--setting-sources project,local`, so only the repo's own settings and hooks were loaded.
+The volatility task was re-run headless on a fresh clone of `predictive-scaling` with slopgate installed (`claude -p`, `--permission-mode acceptEdits`). The earlier live run had the author's global Claude Code plugins loaded, including one that pushes the agent toward reuse, which confounded it. This run used `--setting-sources project,local`, so only the repo's own settings and hooks were loaded.
 
 - **Round 1:** the agent added a `VolatilityFeatureExtractor` with 10 new functions, including `_infer_frequency_seconds`. The Stop hook asked the question shown above and blocked, taking 9.8 s, most of it the uncached judge call.
 - **The agent's answer:** it kept a separate function and said why. The existing helpers truncate the sampling interval to whole minutes, so 30-second data is read as 1-minute data and a "15-minute" window covers 30 minutes. It moved the new helper into the shared `BaseExtractor` instead of keeping it private, and added a 30-second test case. It left the five existing copies unchanged, because switching them would change their features. A reviewer would accept that reason.
@@ -155,6 +155,6 @@ Honest limits: "identical" means identical on the generated inputs (200 in the e
 
 Both functions run in a child process with network access denied and file writes restricted to a temporary directory (`sandbox-exec` on macOS; on Linux, `bwrap` if it is installed), with a time limit per batch and a cap on output size. On Linux the child's address space is capped at 2 GiB; macOS does not enforce that limit, so there is no memory cap there. If no sandbox is available, slopgate still runs, unsandboxed, and its status line ends with `(running unsandboxed)`. The judgeability rules are a pre-filter, not a security boundary; the OS sandbox is what contains execution.
 
-## Limits of this milestone
+## Limits
 
 Blocks at most twice per task and never on the same findings twice, so it cannot trap the agent. Any internal error allows the stop. Stats go to `.git/slopgate/stats.jsonl`.

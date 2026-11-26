@@ -231,3 +231,58 @@ Unchanged. Questions only make sense during an agent's task.
 - The hand-check sample size per cutoff (at least 10 per cutoff where
   available).
 - Where the asked pairs live in the round state.
+
+## 10. Amendment (2026-11-25): pair filters and a judge model
+
+The §7.1 replay showed a cutoff alone is mostly noise. At 0.84, 16% of
+functions got a question and 0 of 10 sampled questions were worth answering.
+Sanan chose "filters first, then a judge".
+
+### 10.1 Pair filters (built, Task 5b)
+These four filters drop a pool function from a candidate's comparison. They
+can only remove questions, never add one.
+- same method name on a different class (parallel implementations);
+- caller or callee by name;
+- `mock` or `fake` in the path;
+- methods of the same class (siblings).
+
+At 0.84 they cut questions to 2.3% of functions, but only 20% of the sampled
+questions were worth answering, short of the 80% target. The live pair
+survives them.
+
+### 10.2 Judge (Sanan's choice: Gemini 4 Hydrogen through the `agy` CLI)
+- **When:** each question that survives the cutoff and the filters is judged
+  before it is asked. It is asked only if the verdict is `reuse`.
+- **Call:**
+  `agy -p <prompt> --model gemini-4-hydrogen-low --json-schema <verdict schema> --output-format json --disable-slash-commands --print-timeout 20s`.
+  It runs from an empty temporary directory, so the model sees nothing but
+  the prompt.
+  - The schema is `{"verdict": "reuse" | "noise", "reason": string}`.
+  - The prompt holds both functions' source, their paths and qualnames, and
+    the same reuse definition the replay labels use.
+- **Fail closed:** anything other than a clean `reuse` means no question. That
+  includes `agy` not being installed, a timeout, a non-`SUCCESS` status, a
+  parse error, or a `noise` verdict. A missing judge silences M3; it never
+  makes it noisier.
+- **Budget:** at most 3 pairs per check, the highest-scoring first, judged in
+  parallel, with a 20 s hard limit for the judge step. Measured on a toy pair:
+  3.6 s of model time and 6.3 s wall-clock per call at `low`.
+- **Cache:** verdicts are cached in the state directory, keyed by
+  sha256(new source NUL existing source), so a pair is never judged twice.
+- **Privacy:** the judge sends the two functions' source to Google. This
+  replaces the §4 "nothing leaves the machine" constraint for M3 only. The
+  README must say so.
+- **The cutoff:** it is re-tuned with the judge in place. A judge allows a
+  lower cutoff, because it removes the noise. Pick the lowest cutoff at which
+  the judged replay meets the original targets: at most 2% of functions asked
+  and at least 80% of questions worth answering, measured against the labeled
+  pairs.
+
+### 10.3 Evaluation
+- Run the judge on every labeled pair from Tasks 5 and 5b and report its
+  agreement with the labels.
+- The live pair must be judged `reuse`.
+- Then run the judged replay per cutoff. Judging every pair above 0.70 is too
+  many calls, so judge the pairs above the lowest candidate cutoff and report
+  the call count.
+- The live re-run (§7.2) uses the judge.

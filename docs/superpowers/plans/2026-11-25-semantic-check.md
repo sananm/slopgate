@@ -340,3 +340,47 @@ claude -p "<the volatility task prompt from the spec's §1 live test>" --setting
 - Change nothing else.
 
 - [ ] **Step 4: Commit** with `docs: semantic questions in README`
+
+---
+
+## Amendment (2026-11-25): Tasks 5b–5d
+
+Spec §10. Task 5b, the pair filters, is done: commits 755a1d9 and 2148f09.
+
+### Task 5c: Judge through `agy`
+
+**Files:**
+- Create: `src/slopgate/judge_model.py`
+- Modify: `src/slopgate/cli.py` (`_questions`)
+- Test: `tests/test_judge_model.py`, `tests/test_cli.py`
+
+**Interfaces:**
+- `JUDGE_MODEL = "gemini-4-hydrogen-low"`
+- `JUDGE_MAX_PAIRS = 3`
+- `JUDGE_TIMEOUT_S = 20`
+- `judge(repo: Path, qs: list[Question]) -> list[Question]`. It returns the questions whose verdict is `reuse`, in their original order.
+  - It judges the top `JUDGE_MAX_PAIRS` by score, in parallel threads. Each is one `subprocess.run(["agy", "-p", prompt, "--model", JUDGE_MODEL, "--json-schema", SCHEMA, "--output-format", "json", "--disable-slash-commands", "--print-timeout", f"{JUDGE_TIMEOUT_S}s"], cwd=<fresh tempfile.TemporaryDirectory()>, timeout=JUDGE_TIMEOUT_S + 5)`.
+  - A question beyond the top 3 is dropped, not asked.
+- **Verdict:** `reuse` only when the stdout JSON has `status == "SUCCESS"` and `structured_output.verdict == "reuse"`. Every other outcome is `noise`, and the `noise` result is not cached when it came from a failure.
+- **Cache:** `state_dir(repo) / "verdicts.json"`, mapping sha256(new.source NUL existing.source) to `"reuse"` or `"noise"`. A corrupt file reads as empty.
+- **The prompt** holds both paths, qualnames and sources, and this reuse definition: "reuse if an experienced engineer reviewing the new function would say 'call the existing one instead' (a small adaptation such as a unit conversion is fine); noise if they only look alike".
+- **`_questions` in cli.py** calls `judge` on its questions after the asked-once filter and before returning. The whole call is already inside M3's try.
+
+**Tests:** these use a fake `agy` (monkeypatch `subprocess.run`):
+- `reuse` keeps the question, and `noise` drops it.
+- A missing binary, a timeout, a bad JSON reply and `status != SUCCESS` each drop the question, without raising and without caching.
+- A cached verdict makes no subprocess call.
+- At most 3 calls are made for 5 questions.
+- The prompt contains both sources.
+- In `test_cli`, a judged `noise` means the check allows the stop with no question.
+
+**Commit:** `feat: judge semantic questions before asking`
+
+### Task 5d: Judged replay and the cutoff (stops for Sanan)
+
+- **Agreement:** run `judge` on every labeled pair from Tasks 5 and 5b. Report agreement with the labels, and the live pair's verdict, which must be `reuse`.
+- **Judged replay:** from 0.70 to 0.90 in steps of 0.02, report the share of functions asked after the filters and the judge, and the precision against labels. Label any newly judged pairs the same way, with a one-line reason.
+  - Report the number of judge calls.
+  - Pick the lowest cutoff that meets the original targets.
+  - Labels and verdicts stay in the gitignored workspace.
+- **Stop:** report, then wait. `SEMANTIC_CUTOFF` changes only after Sanan approves.

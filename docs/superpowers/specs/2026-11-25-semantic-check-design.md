@@ -286,3 +286,22 @@ survives them.
   many calls, so judge the pairs above the lowest candidate cutoff and report
   the call count.
 - The live re-run (§7.2) uses the judge.
+
+### 10.4 What counts as worth asking (Sanan, 2026-11-25)
+
+A question is worth asking when the new function **re-implements logic that
+already exists**. Either the agent should call the existing function (with a
+small adaptation if needed), or the two should share one helper instead of
+being near-duplicates. This matches the original slop definition: "rewriting
+logic that already exists in another file". It is broader than §7.1's "call it
+as-is" rule, which made the live pair and near-duplicate factories count as
+noise.
+
+- **The judge prompt** asks whether the new function duplicates logic from
+  the existing one: it should either call it, or the two should share a
+  helper. The verdict is `reuse` when the answer is yes.
+- **The question text** (§6.4) changes its last line to:
+  `  Reuse it or share a helper with it, or reply with why the new one is different.`
+- **The verdict cache key** gains a prompt version, so verdicts given under
+  the old prompt are never reused.
+- **All labels are re-applied** under this rule before the cutoff is chosen.

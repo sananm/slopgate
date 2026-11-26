@@ -13,6 +13,7 @@ from slopgate.changes import Changes, classify
 from slopgate.clones import clone_groups, clone_key, find_clones, format_clone
 from slopgate.deps import find_new_deps, format_new_dep
 from slopgate.index import FunctionInfo, index_repo
+from slopgate.judge_model import judge
 from slopgate.reinvention import Embed, cached_embeddings, default_embed, find_reinventions, format_finding
 from slopgate.rounds import asked, load_rounds, record_asked, should_block
 from slopgate.sandbox import pick_interpreter, sandbox_kind
@@ -87,7 +88,7 @@ def _shape_sets(repo: Path, *text_sets: dict[str, str]) -> list[list[Shape]]:
 
 def _questions(repo: Path, task_id: str, changes: Changes, snap_index: list[FunctionInfo], before: list[Shape], after: list[Shape],
                skip: set[tuple[str, str]], embed: Embed) -> tuple[list[Question], int]:
-    """M3: new functions that strongly resemble an existing one, minus those already asked this task."""
+    """M3: new functions that strongly resemble an existing one, minus those already asked this task or judged noise."""
     cands = semantic_candidates(changes.new, after, skip)
     old = {(f.path, f.qualname): f for f in snap_index}
     pool = {(f.path, f.qualname): f for f in changes.existing}
@@ -102,7 +103,7 @@ def _questions(repo: Path, task_id: str, changes: Changes, snap_index: list[Func
     vecs, left = cached_embeddings(repo, [c.source for c in cands], [p.source for p in pool], embed, MAX_HOOK_EMBEDS)
     done = asked(repo, task_id)
     qs = find_questions(cands, pool, vecs, {(s.path, s.qualname): s.exact_key for s in before})
-    return [q for q in qs if question_key(q) not in done], left
+    return judge(repo, [q for q in qs if question_key(q) not in done]), left
 
 
 def _check(t0: float) -> dict:

@@ -19,6 +19,11 @@ def no_model(monkeypatch):
     monkeypatch.setattr("slopgate.cli.default_embed", lambda: fake_embed)
 
 
+@pytest.fixture(autouse=True)
+def judge_says_reuse(monkeypatch):
+    monkeypatch.setattr("slopgate.cli.judge", lambda repo, qs: qs)
+
+
 @pytest.fixture
 def fixture_git_repo(fixture_repo, tmp_path):
     dst = tmp_path / "repo"
@@ -388,6 +393,26 @@ def test_similar_new_method_gets_one_question_then_allows(fixture_git_repo, caps
     second = json.loads(capsys.readouterr().out)
     assert "decision" not in second and "question:" not in second["systemMessage"]
     assert (last_stats(fixture_git_repo)["questions"], last_stats(fixture_git_repo)["resolved"]) == (0, 0)
+
+
+def test_judged_noise_allows_without_question(fixture_git_repo, capsys, steer, monkeypatch):
+    from slopgate.judge_model import judge
+    real_run, calls = subprocess.run, []
+
+    def agy(cmd, *a, **k):
+        if cmd[0] != "agy":
+            return real_run(cmd, *a, **k)
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, '{"status": "SUCCESS", "structured_output": {"verdict": "noise"}}', "")
+    monkeypatch.setattr("slopgate.cli.judge", judge)
+    monkeypatch.setattr("slopgate.judge_model.subprocess.run", agy)
+    run_hook(["start"], fixture_git_repo)
+    (fixture_git_repo / "ledger.py").write_text(LEDGER)
+    run_hook(["check"], fixture_git_repo)
+    out = json.loads(capsys.readouterr().out)
+    assert "decision" not in out and "question:" not in out["systemMessage"]
+    assert "semantic check skipped" not in out["systemMessage"] and len(calls) == 1
+    assert last_stats(fixture_git_repo)["questions"] == 0
 
 
 def test_rename_after_question_does_not_reask(fixture_git_repo, capsys, steer):

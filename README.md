@@ -69,7 +69,7 @@ Without the planted helper, slopgate would have judged nothing in this repo. Tha
 
 ## Semantic questions (M3)
 
-The common case is neither a copy nor provably the same function: the agent writes the same idea again in a different way. An earlier live run on `predictive-scaling` showed this. The agent wrote `_infer_frequency_seconds` while `_infer_frequency_minutes` already existed in five places, and slopgate let it through. M3 does not claim these are duplicates. It blocks once with a question, and the agent decides.
+The common case is neither a copy nor provably the same function: the agent writes the same idea again in a different way. An earlier live run on `predictive-scaling` showed this. The agent wrote `_infer_frequency_seconds` while `_infer_frequency_minutes` already existed in five places (the question below names it and its 4 copies), and slopgate let it through. M3 does not claim these are duplicates. It blocks once with a question, and the agent decides.
 
 ### What triggers a question
 
@@ -108,7 +108,7 @@ The replay treated every eligible function in three repos as new and the rest of
 | + pair filters | 0.84 | 2.3% | 2 of 10 |
 | + filters and judge | 0.80 (shipped) | 17 of 795 (2.1%) | 15 of 17 (88%) |
 
-The targets were at most 2% of functions asked and at least 80% worth asking. 0.80 asks 2.1%. 0.82 would ask 1.3% at 80% (8 of 10), so it sits exactly on the precision target with fewer samples. At 0.80, every pair the judge passed was labeled.
+The targets were at most 2% of functions asked and at least 80% worth asking. 0.80 asks 2.1%. 0.82 would ask 1.3% at 80% (8 of 10), exactly on the precision target. That figure depends on one borderline label (a pair of infrastructure-state functions), and 6 of its 8 hits are pairs relabeled as worth asking under the broader rule above, so choosing 0.80 over 0.82 is a judgment call, not clearly better. At 0.80, every pair the judge passed was labeled. The first two rows score a sample of up to 10 questions each; the shipped row counts all 17 questions asked.
 
 Per repo at 0.80:
 
@@ -118,9 +118,9 @@ Per repo at 0.80:
 | second repo | 122 | 2 (1.6%) | 2 of 2 |
 | third repo | 99 | 3 (3.0%) | 3 of 3 |
 
-Each duplicate is counted once from each side, so the 17 questions cover fewer distinct situations. The judge agreed with the hand labels on 66 of 74 labeled pairs (89%), over 179 calls with no failures. Embedding scores depend on the model version, so the cutoff belongs to the current embedding model.
+Each duplicate is counted once from each side, so the 17 questions cover fewer distinct situations. The judge agreed with the hand labels on 66 of 74 labeled pairs (89%), over 179 calls with no failures. Some of those labels were flipped to worth asking under the broader rule after the judge's verdicts had been seen, so this agreement figure is partly circular. Embedding scores depend on the model version, so the cutoff belongs to the current embedding model.
 
-With a warm cache, the similarity step adds 0.34 s to a Stop on `predictive-scaling`. A judge call takes about 6 s wall-clock, and only pairs that pass the cutoff and the filters are judged.
+With a warm cache, the similarity step adds 0.34 s to a Stop on `predictive-scaling`. A batch of up to 3 judge calls, run in parallel, took 5–8 s wall-clock in the replay, and only pairs that pass the cutoff and the filters are judged.
 
 ### Live re-run
 

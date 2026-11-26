@@ -22,9 +22,9 @@ def test_question_text_exact():
     assert format_question(q) == (
         "question: src/a.py:52 V._infer_frequency_seconds\n"
         "  looks like src/b.py:182 D._infer_frequency_minutes (and 4 copies of it).\n"
-        "  Reuse it, or reply with why the new one is different.")
+        "  Reuse it or share a helper with it, or reply with why the new one is different.")
     q0 = Question(q.new, q.existing, 0.9, 0)
-    assert format_question(q0).endswith("D._infer_frequency_minutes.\n  Reuse it, or reply with why the new one is different.")
+    assert format_question(q0).endswith("D._infer_frequency_minutes.\n  Reuse it or share a helper with it, or reply with why the new one is different.")
     assert question_key(q) == "src/b.py\tD._infer_frequency_minutes"
 
 

@@ -16,16 +16,19 @@ SCHEMA = json.dumps({"type": "object", "required": ["verdict", "reason"],
                      "properties": {"verdict": {"type": "string", "enum": ["reuse", "noise"]},
                                     "reason": {"type": "string"}}})
 VERDICTS = ("reuse", "noise")
+PROMPT_VERSION = 2  # bump when the prompt changes, so old verdicts are never reused
 
 
 def _key(q: Question) -> str:
-    return hashlib.sha256(f"{q.new.source}\0{q.existing.source}".encode()).hexdigest()
+    return hashlib.sha256(f"{PROMPT_VERSION}\0{q.new.source}\0{q.existing.source}".encode()).hexdigest()
 
 
 def _prompt(q: Question) -> str:
     return ("A coding agent just wrote a new function that resembles an existing one in the same repo.\n"
-            "Answer reuse if an experienced engineer reviewing the new function would say 'call the existing one "
-            "instead' (a small adaptation such as a unit conversion is fine); noise if they only look alike.\n\n"
+            "Answer reuse if the new function re-implements logic the existing one already has: it should call the "
+            "existing one (a small adaptation, such as a unit conversion or a precision difference, is fine), or the "
+            "two are near-duplicates that should share a helper (only literals, config or file types differ).\n"
+            "Answer noise if they only look alike, or do opposite or different jobs.\n\n"
             f"New function: {q.new.path} {q.new.qualname}\n```python\n{q.new.source}\n```\n\n"
             f"Existing function: {q.existing.path} {q.existing.qualname}\n```python\n{q.existing.source}\n```\n")
 

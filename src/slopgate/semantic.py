@@ -121,4 +121,4 @@ def format_question(q: Question) -> str:
     more = f" (and {q.copies} copies of it)" if q.copies else ""
     return (f"question: {q.new.path}:{q.new.line} {q.new.qualname}\n"
             f"  looks like {q.existing.path}:{q.existing.line} {q.existing.qualname}{more}.\n"
-            "  Reuse it, or reply with why the new one is different.")
+            "  Reuse it or share a helper with it, or reply with why the new one is different.")

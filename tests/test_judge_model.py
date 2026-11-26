@@ -1,3 +1,4 @@
+import hashlib
 import json
 import subprocess
 
@@ -60,6 +61,12 @@ def test_cached_verdict_makes_no_call(tmp_repo, agy):
     assert jm.judge(tmp_repo, [q(1)]) == [q(1)] and len(agy.calls) == 1
 
 
+def test_verdict_cached_under_the_old_prompt_is_judged_again(tmp_repo, agy):
+    old_key = hashlib.sha256(f"{q(1).new.source}\0{q(1).existing.source}".encode()).hexdigest()
+    (state_dir(tmp_repo) / "verdicts.json").write_text(json.dumps({old_key: "noise"}))
+    assert jm.judge(tmp_repo, [q(1)]) == [q(1)] and len(agy.calls) == 1
+
+
 def test_corrupt_cache_reads_as_empty(tmp_repo, agy):
     (state_dir(tmp_repo) / "verdicts.json").write_text("{nope")
     assert jm.judge(tmp_repo, [q(1)]) == [q(1)] and len(agy.calls) == 1
@@ -74,7 +81,7 @@ def test_call_shape_and_prompt(tmp_repo, agy):
     jm.judge(tmp_repo, [q(1)])
     cmd, k = agy.calls[0]
     prompt = cmd[cmd.index("-p") + 1]
-    for s in ("src-src/n1.py-new1", "src-src/o1.py-old1", "src/n1.py", "old1", "call the existing one instead"):
+    for s in ("src-src/n1.py-new1", "src-src/o1.py-old1", "src/n1.py", "old1", "call the existing one", "share a helper"):
         assert s in prompt
     assert cmd[cmd.index("--model") + 1] == "gemini-4-hydrogen-low"
     assert cmd[-2:] == ["--print-timeout", "20s"] and k["timeout"] == 25

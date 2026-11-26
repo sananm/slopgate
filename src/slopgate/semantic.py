@@ -54,8 +54,8 @@ def _cls(f: FunctionInfo) -> str | None:
 @lru_cache(maxsize=4096)
 def _called_names(source: str) -> frozenset[str]:
     try:
-        tree = ast.parse(textwrap.dedent(source))
-    except SyntaxError:
+        tree = ast.parse("if 1:\n" + textwrap.indent(source, " "))  # dedent fails on a column-0 line in a string
+    except (SyntaxError, ValueError, RecursionError):
         return frozenset()
     return frozenset(c.func.id if isinstance(c.func, ast.Name) else c.func.attr for c in ast.walk(tree)
                      if isinstance(c, ast.Call) and isinstance(c.func, (ast.Name, ast.Attribute)))
@@ -86,7 +86,10 @@ def unrelated(f: FunctionInfo, g: FunctionInfo, filters=tuple(PAIR_FILTERS.value
 
 
 def find_questions(candidates: list[FunctionInfo], pool: list[FunctionInfo], vecs: dict[str, list[float]],
-                   exact_keys: dict[tuple[str, str], str]) -> list[Question]:
+                   exact_keys: dict[tuple[str, str], str],
+                   now: dict[tuple[str, str], FunctionInfo] | None = None) -> list[Question]:
+    """`now` holds the current version of changed pool functions, which are scored in their snapshot version."""
+    now = now or {}
     pool = [g for g in pool if g.source in vecs]
     groups: dict[str, list[FunctionInfo]] = {}
     for g in pool:
@@ -102,7 +105,8 @@ def find_questions(candidates: list[FunctionInfo], pool: list[FunctionInfo], vec
         for score, g in sorted(((_cosine(vecs[f.source], vecs[g.source]), g) for g in pool), key=lambda t: -t[0]):
             if score < SEMANTIC_CUTOFF:
                 break
-            if unrelated(f, g):
+            g_now = now.get((g.path, g.qualname))
+            if unrelated(f, g) and not (g_now and _calls(f, g_now)):  # an extracted helper is called by its source
                 best = g
                 break
         if best is None:

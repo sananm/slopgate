@@ -102,7 +102,8 @@ def _questions(repo: Path, task_id: str, changes: Changes, snap_index: list[Func
         return [], 0
     vecs, left = cached_embeddings(repo, [c.source for c in cands], [p.source for p in pool], embed, MAX_HOOK_EMBEDS)
     done = asked(repo, task_id)
-    qs = find_questions(cands, pool, vecs, {(s.path, s.qualname): s.exact_key for s in before})
+    qs = find_questions(cands, pool, vecs, {(s.path, s.qualname): s.exact_key for s in before},
+                        {(f.path, f.qualname): f for f in changes.changed})
     return judge(repo, [q for q in qs if question_key(q) not in done]), left
 
 

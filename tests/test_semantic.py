@@ -120,3 +120,18 @@ def test_skips_same_class_sibling_methods():
     new = fi("src/a.py", 1, "H._days_since")
     assert _asked(new, [fi("src/a.py", 2, "H._days_until")]) == []
     assert _asked(new, [fi("src/a.py", 2, "G._days_until")]) == ["G._days_until"]  # control: other class
+
+
+def test_changed_pool_function_now_calling_the_candidate_is_skipped():
+    old_x = _src(fi("src/a.py", 1, "total"), "def total(rows):\n    return sum(r.qty for r in rows)\n")
+    y = _src(fi("src/a.py", 5, "_sum_qty"), "def _sum_qty(rows):\n    return sum(r.qty for r in rows)\n")
+    vecs = {x.source: [1.0, 0.0] for x in (old_x, y)}
+    now_x = _src(old_x, "def total(rows):\n    return _sum_qty(rows)\n")
+    assert find_questions([y], [old_x], vecs, {}, {("src/a.py", "total"): now_x}) == []
+    other = _src(old_x, "def total(rows):\n    return 0\n")  # control: X changed but does not call Y
+    assert len(find_questions([y], [old_x], vecs, {}, {("src/a.py", "total"): other})) == 1
+
+
+def test_calls_found_in_method_with_column_zero_string():
+    m = _src(fi("src/a.py", 1, "C.run"), '    def run(self):\n        s = """\nx\n"""\n        return helper(s)\n')
+    assert _asked(fi("src/b.py", 1, "helper"), [m]) == []

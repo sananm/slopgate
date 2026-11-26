@@ -493,6 +493,16 @@ def test_modified_original_is_compared_in_its_snapshot_version(fixture_git_repo,
     assert out["decision"] == "block" and "looks like a.py:1 weighted_total" in out["reason"]
 
 
+def test_extracted_helper_called_by_its_changed_source_is_not_asked(fixture_git_repo, capsys, steer):
+    run_hook(["start"], fixture_git_repo)
+    (fixture_git_repo / "a.py").write_text("from ledger import Ledger\n\n\ndef weighted_total(prices, weights):\n"
+                                           "    return Ledger().tally(zip(prices, weights))\n")
+    (fixture_git_repo / "ledger.py").write_text(LEDGER)
+    run_hook(["check"], fixture_git_repo)
+    out = json.loads(capsys.readouterr().out)
+    assert "question:" not in out.get("reason", "") + out["systemMessage"]
+
+
 def test_install_pre_embeds_the_pool(fixture_git_repo, monkeypatch):
     from slopgate.index import index_repo
     from slopgate.reinvention import cached_embeddings

@@ -384,3 +384,27 @@ Spec §10. Task 5b, the pair filters, is done: commits 755a1d9 and 2148f09.
   - Pick the lowest cutoff that meets the original targets.
   - Labels and verdicts stay in the gitignored workspace.
 - **Stop:** report, then wait. `SEMANTIC_CUTOFF` changes only after Sanan approves.
+
+### Task 5e: Broader reuse rule (spec §10.4), then re-measure (stops for Sanan)
+
+**Files:**
+- Modify: `src/slopgate/judge_model.py` (the prompt, plus `PROMPT_VERSION = 2` in the cache key)
+- Modify: `src/slopgate/semantic.py` (`format_question`'s last line)
+- Modify: the tests that pin the question text
+- Test: `tests/test_judge_model.py`
+
+**Step 1 (TDD):**
+- An old-key cached verdict is ignored, and the pair is judged again.
+- The prompt contains the phrase "share a helper".
+- `format_question`'s exact new last line:
+  `  Reuse it or share a helper with it, or reply with why the new one is different.`
+
+Commit with `feat: ask about near-duplicates too`.
+
+**Step 2 (measure):**
+- Re-label every judged or labeled pair under §10.4 and write the result to `replay/labels-5e.md`.
+- Re-run the judge on the same 179 pairs with the new prompt.
+- Report the confusion matrix, the live pair's verdict and the per-cutoff table, as in Task 5d.
+- Propose the lowest cutoff with ≤2% of functions asked and ≥80% precision, or report BLOCKED.
+
+`SEMANTIC_CUTOFF` changes only after Sanan approves.

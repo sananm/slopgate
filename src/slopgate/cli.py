@@ -129,8 +129,18 @@ def _check(t0: float) -> dict:
     wrappers = find_wrappers(new_ids, now) if new_ids else []
     deps = find_new_deps({p for p in changed if p in now}, now, snap.files) if changed else []
 
-    model = functools.cache(default_embed)  # loaded on the first embedding actually needed, if any
-    embed = lambda texts: model()(texts)  # noqa: E731
+    @functools.cache  # loaded on the first embedding actually needed, if any
+    def model():
+        try:
+            return default_embed()
+        except Exception as e:  # remembered, so M1 does not retry a failed load
+            return e
+
+    def embed(texts):
+        m = model()
+        if isinstance(m, Exception):
+            raise m
+        return m(texts)
     try:
         questions, left = _questions(repo, snap.task_id, changes, snap_index, before, after,
                                      {(c.new.path, c.new.qualname) for c in clones}, embed)

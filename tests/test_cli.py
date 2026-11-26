@@ -460,6 +460,21 @@ def test_model_failure_skips_semantic_and_allows(fixture_git_repo, capsys, monke
     assert "decision" not in out and "semantic check skipped: RuntimeError" in out["systemMessage"]
 
 
+def test_failed_model_load_is_not_retried_by_m1(fixture_git_repo, capsys, monkeypatch):
+    calls = []
+
+    def load():
+        calls.append(1)
+        raise RuntimeError("boom")
+    monkeypatch.setattr("slopgate.cli.default_embed", load)
+    run_hook(["start"], fixture_git_repo)
+    (fixture_git_repo / "ledger.py").write_text(LEDGER)  # M3 needs the model
+    add_reinvention(fixture_git_repo)  # M1 needs it too
+    run_hook(["check"], fixture_git_repo)
+    out = json.loads(capsys.readouterr().out)
+    assert calls == [1] and "decision" not in out
+
+
 def test_question_dropped_when_m1_proves_it(fixture_git_repo, capsys, steer, monkeypatch):
     from slopgate.reinvention import CheckResult, Finding
 

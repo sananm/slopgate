@@ -20,7 +20,7 @@ PROMPT_VERSION = 2  # bump when the prompt changes, so old verdicts are never re
 
 
 def _key(q: Question) -> str:
-    return hashlib.sha256(f"{PROMPT_VERSION}\0{q.new.source}\0{q.existing.source}".encode()).hexdigest()
+    return hashlib.sha256(f"{PROMPT_VERSION}\0{JUDGE_MODEL}\0{q.new.source}\0{q.existing.source}".encode()).hexdigest()
 
 
 def _prompt(q: Question) -> str:
@@ -65,6 +65,9 @@ def judge(repo: Path, qs: list[Question]) -> list[Question]:
             for q, verdict in zip(todo, pool.map(_ask, todo)):
                 if verdict:  # failures are not cached, so the pair is judged again next time
                     cache[_key(q)] = verdict
-        path.write_text(json.dumps(cache))
+        try:
+            path.write_text(json.dumps(cache))
+        except OSError:  # the verdicts in hand still count
+            pass
     keep = {id(q) for q in top if cache.get(_key(q)) == "reuse"}
     return [q for q in qs if id(q) in keep]

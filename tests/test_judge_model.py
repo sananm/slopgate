@@ -86,3 +86,17 @@ def test_call_shape_and_prompt(tmp_repo, agy):
     assert cmd[cmd.index("--model") + 1] == "gemini-4-hydrogen-low"
     assert cmd[-2:] == ["--print-timeout", "20s"] and k["timeout"] == 25
     assert k["cwd"] != str(tmp_repo) and "--disable-slash-commands" in cmd
+
+
+def test_verdict_cached_under_another_model_is_judged_again(tmp_repo, agy, monkeypatch):
+    monkeypatch.setattr(jm, "JUDGE_MODEL", "old-model")
+    agy.stdout = reply("noise")
+    assert jm.judge(tmp_repo, [q(1)]) == []
+    monkeypatch.setattr(jm, "JUDGE_MODEL", "new-model")
+    agy.stdout = reply()
+    assert jm.judge(tmp_repo, [q(1)]) == [q(1)] and len(agy.calls) == 2
+
+
+def test_failed_cache_write_still_returns_verdicts(tmp_repo, agy):
+    (state_dir(tmp_repo) / "verdicts.json").mkdir()  # unreadable and unwritable as a file
+    assert jm.judge(tmp_repo, [q(1)]) == [q(1)]
